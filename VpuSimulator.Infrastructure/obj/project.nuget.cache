@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "dgSpecHash": "zAJWGIVNccM=",
+  "success": false,
+  "projectFilePath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Infrastructure\\VpuSimulator.Infrastructure.csproj",
+  "expectedPackageFiles": [],
+  "logs": [
+    {
+      "code": "NU1201",
+      "level": "Error",
+      "message": "Project VpuSimulator.Domain is not compatible with net9.0 (.NETCoreApp,Version=v9.0). Project VpuSimulator.Domain supports: net10.0 (.NETCoreApp,Version=v10.0)",
+      "projectPath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Infrastructure\\VpuSimulator.Infrastructure.csproj",
+      "filePath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Infrastructure\\VpuSimulator.Infrastructure.csproj",
+      "libraryId": "VpuSimulator.Domain",
+      "targetGraphs": [
+        "net9.0"
+      ]
+    }
+  ]
+}

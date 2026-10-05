@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "cKTuHSKeBsg=",
+  "success": true,
+  "projectFilePath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Api\\VpuSimulator.Api.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\ADMIN\\.nuget\\packages\\microsoft.aspnetcore.openapi\\9.0.20\\microsoft.aspnetcore.openapi.9.0.20.nupkg.sha512",
+    "C:\\Users\\ADMIN\\.nuget\\packages\\microsoft.openapi\\1.6.30\\microsoft.openapi.1.6.30.nupkg.sha512"
+  ],
+  "logs": []
+}
