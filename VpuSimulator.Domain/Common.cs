@@ -14,15 +14,14 @@ namespace VpuSimulator.Domain
     public sealed record RegionConfig(
         string Path,
         string? Head,
-        int TargetWith,
+        int TargetWidth,
         int TargetHeight,
         string Anchor);
 
     public sealed record AffectObjectConfig(
         string label,
         double OverlapRatio,
-        double DimRationMin,
-        double DimRationMax,
+        IReadOnlyList<double> DimRatio,
         int MinArea,
         IReadOnlyList<string> Movement,
         int Direction

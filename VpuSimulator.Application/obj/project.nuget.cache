@@ -1,20 +1,21 @@
 {
   "version": 2,
-  "dgSpecHash": "JRwGQ4h0oGo=",
-  "success": false,
-  "projectFilePath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Application\\VpuSimulator.Application.csproj",
-  "expectedPackageFiles": [],
-  "logs": [
-    {
-      "code": "NU1201",
-      "level": "Error",
-      "message": "Project VpuSimulator.Domain is not compatible with net9.0 (.NETCoreApp,Version=v9.0). Project VpuSimulator.Domain supports: net10.0 (.NETCoreApp,Version=v10.0)",
-      "projectPath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Application\\VpuSimulator.Application.csproj",
-      "filePath": "D:\\Elcom\\VpuSimulator\\VpuSimulator.Application\\VpuSimulator.Application.csproj",
-      "libraryId": "VpuSimulator.Domain",
-      "targetGraphs": [
-        "net9.0"
-      ]
-    }
-  ]
+  "dgSpecHash": "ZkfH4YAH+20=",
+  "success": true,
+  "projectFilePath": "E:\\VpuSimulator\\VpuSimulator.Application\\VpuSimulator.Application.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Admin\\.nuget\\packages\\fluentvalidation\\12.1.1\\fluentvalidation.12.1.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\fluentvalidation.dependencyinjectionextensions\\12.1.1\\fluentvalidation.dependencyinjectionextensions.12.1.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\mapster\\10.1.0-pre02\\mapster.10.1.0-pre02.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\mapster.core\\10.1.0-pre02\\mapster.core.10.1.0-pre02.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\mediatr\\14.2.0\\mediatr.14.2.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\mediatr.contracts\\2.0.1\\mediatr.contracts.2.0.1.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\10.0.0\\microsoft.extensions.dependencyinjection.abstractions.10.0.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.extensions.logging.abstractions\\10.0.0\\microsoft.extensions.logging.abstractions.10.0.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.identitymodel.abstractions\\8.14.0\\microsoft.identitymodel.abstractions.8.14.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.identitymodel.jsonwebtokens\\8.14.0\\microsoft.identitymodel.jsonwebtokens.8.14.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.identitymodel.logging\\8.14.0\\microsoft.identitymodel.logging.8.14.0.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\microsoft.identitymodel.tokens\\8.14.0\\microsoft.identitymodel.tokens.8.14.0.nupkg.sha512"
+  ],
+  "logs": []
 }

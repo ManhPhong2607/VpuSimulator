@@ -1,0 +1,12 @@
+e:\VpuSimulator\VpuSimulator.EventBuilder\bin\Debug\net10.0\VpuSimulator.EventBuilder.deps.json
+e:\VpuSimulator\VpuSimulator.EventBuilder\bin\Debug\net10.0\VpuSimulator.EventBuilder.dll
+e:\VpuSimulator\VpuSimulator.EventBuilder\bin\Debug\net10.0\VpuSimulator.EventBuilder.pdb
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.GeneratedMSBuildEditorConfig.editorconfig
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.AssemblyInfoInputs.cache
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.AssemblyInfo.cs
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.csproj.CoreCompileInputs.cache
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.sourcelink.json
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.dll
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\refint\VpuSimulator.EventBuilder.dll
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\VpuSimulator.EventBuilder.pdb
+e:\VpuSimulator\VpuSimulator.EventBuilder\obj\Debug\net10.0\ref\VpuSimulator.EventBuilder.dll
