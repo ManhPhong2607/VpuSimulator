@@ -1,0 +1,8 @@
+﻿root = true
+
+[*.cs]
+# Khóa quy tắc: Namespace KHÔNG phụ thuộc vào cấu trúc thư mục
+dotnet_style_namespace_match_folder = false:suggestion
+
+# Ưu tiên File-scoped namespace cho C# 10+
+csharp_style_namespace_declarations = file_scoped:warning

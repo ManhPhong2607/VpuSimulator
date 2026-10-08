@@ -1,0 +1,106 @@
+# ============================================================
+# VpuSimulator — .gitignore (.NET 10 + Visual Studio/Rider + Next.js console)
+# Đặt ở GỐC repo (cùng cấp VpuSimulator.sln).
+# ============================================================
+
+# ---- Build output ----
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+*.dll
+*.exe
+*.pdb
+*.nupkg
+*.snupkg
+
+# ---- Visual Studio ----
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.csproj.user
+*.rsuser
+*.VC.db
+*.VC.VC.opendb
+launchSettings.json.user
+
+# ---- JetBrains Rider ----
+.idea/
+*.sln.iml
+
+# ---- VS Code (giữ lại cấu hình chung nếu muốn chia sẻ) ----
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ---- Test / coverage ----
+TestResults/
+[Tt]est[Rr]esult*/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+coverage.cobertura.xml
+lcov.info
+
+# ---- NuGet ----
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+.nuget/
+
+# ---- Secrets & cấu hình cục bộ (KHÔNG commit) ----
+# appsettings.json và appsettings.Development.json vẫn được commit (chỉ chứa giá trị mặc định, không có secret).
+appsettings.*.local.json
+appsettings.Local.json
+secrets.json
+*.pfx
+*.p12
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+
+# ---- Dữ liệu chạy local ----
+# Log Serilog ghi ra file, dữ liệu Docker volume, durable upload queue (FR-OBJ-6)
+*.log
+logs/
+data/
+.data/
+upload-queue/
+.docker-volumes/
+
+# ---- Docker / compose override cục bộ ----
+docker-compose.override.yml
+
+# ---- Console (Next.js) ----
+console/node_modules/
+console/.next/
+console/out/
+console/.turbo/
+console/.vercel/
+console/*.tsbuildinfo
+console/next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- File tạm / OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+*.tmp
+*.bak
