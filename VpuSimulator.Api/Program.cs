@@ -1,6 +1,9 @@
 ﻿using System.Text.Json;
+using VpuSimulator.Api.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddVpuMessaging(builder.Configuration);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -35,7 +38,7 @@ app.MapGet("/api/v1/stream", async (HttpContext ctx, CancellationToken ct) =>
 
     while (!ct.IsCancellationRequested)
     {
-        var heartbeat = new { type = "heartbeat", timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+        var heartbeat = new { type = "heartbeat", timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }; //Heartbeat của console, k phải 
         await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(heartbeat)}\n\n", ct);
         await ctx.Response.Body.FlushAsync(ct);
         await Task.Delay(5000, ct);

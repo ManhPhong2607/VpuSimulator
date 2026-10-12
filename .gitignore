@@ -104,3 +104,9 @@ desktop.ini
 *~
 *.tmp
 *.bak
+
+appsettings.Development.json
+docker-compose.rabbitmq.yml
+
+VpuSimulator.Application.Tests/
+VpuSimulator.ArchitectureTests/
