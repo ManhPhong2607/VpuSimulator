@@ -4,19 +4,20 @@ using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using VpuSimulator.Application.Interfaces;
+using VpuSimulator.Application.Messaging;
 using VpuSimulator.Application.Options;
 
 namespace VpuSimulator.Infrastructure.Messaging;
 
 /// <summary>
-/// 1 identity = 1 kết nối + 1 channel RabbitMQ riêng (SRS IF-MQ-2), tới đúng target (host/vhost/exchange) được chọn.
+/// 1 identity = 1 kết nối + 1 channel RabbitMQ riêng, tới đúng target (host/vhost/exchange) được chọn.
 ///
-/// Vòng đời: <see cref="StartAsync"/> chỉ khởi động tác vụ nền rồi trả về NGAY. Tác vụ nền lặp:
-/// kết nối → subscribe → báo <see cref="OnConnectedAsync"/> → chờ tới khi mất kết nối → đợi backoff → lặp lại.
-/// Broker tắt thì không ném exception ra ngoài, chỉ ghi log rồi thử lại (FR-ID-2, FR-ID-7).
+/// Vòng đời: StartAsync chỉ khởi động tác vụ nền rồi trả về NGAY. Tác vụ nền lặp:
+/// kết nối → subscribe → báo OnConnectedAsync → chờ tới khi mất kết nối → đợi backoff → lặp lại.
+/// Broker tắt thì không ném exception ra ngoài, chỉ ghi log rồi thử lại.
 ///
 /// Cố ý TẮT auto-recovery của thư viện và tự viết vòng lặp, vì mỗi lần kết nối lại phải chạy callback
-/// (để gửi lại <c>running</c>) và backoff phải đúng 1s→30s theo cấu hình.
+/// (để gửi lại running) và backoff phải đúng 1s→30s theo cấu hình.
 /// </summary>
 public sealed class RabbitMqBrokerSession : IBrokerSession
 {
@@ -28,9 +29,11 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
     private readonly JsonSerializerOptions _json;
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _publishLock = new(1, 1);
+    private static readonly TimeSpan StableConnection = TimeSpan.FromSeconds(30);
 
     private Task? _runTask;
     private volatile IChannel? _channel;
+    private volatile bool _channelReady;
     private volatile bool _connected;
     private int _disposed;
 
@@ -52,13 +55,15 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
         _appId = appId;
         _time = time;
         _logger = logger ?? NullLogger.Instance;
-        // Mặc định của System.Text.Json KHÔNG bỏ key null → "detail": null vẫn có mặt (SRS CON-2). Đừng bật DefaultIgnoreCondition.
+        // Mặc định của System.Text.Json KHÔNG bỏ key null → "detail": null vẫn có mặt. Đừng bật DefaultIgnoreCondition.
         _json = json ?? new JsonSerializerOptions();
     }
 
     public bool IsConnected => _connected;
 
     public Func<CancellationToken, Task>? OnConnectedAsync { get; set; }
+
+    public Func<InboundMessage, CancellationToken, Task>? OnMessageAsync { get; set; }
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -77,23 +82,32 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentNullException.ThrowIfNull(envelope);
-
-        var channel = _channel;
-        if (!_connected || channel is null)
-        {
-            // Mất kết nối thì bỏ, không đệm (SRS FR-ID-10). Bên gọi (HeartbeatLoop) đã tự kiểm tra IsConnected.
-            throw new InvalidOperationException($"Identity '{_appId}' chưa kết nối tới broker '{_brokerName}'.");
-        }
-
-        var body = JsonSerializer.SerializeToUtf8Bytes(envelope, envelope.GetType(), _json);
-        var properties = new BasicProperties { ContentType = "application/json" };   // SRS IF-MQ-6
-
-        // Serialize các lần publish trên cùng channel (không giả định channel an toàn khi publish đồng thời).
+        
         await _publishLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await channel.BasicPublishAsync(_options.Exchange, routingKey, mandatory: false, properties, body, cancellationToken)
-                .ConfigureAwait(false);
+            // Đọc trạng thái SAU khi giữ khoá, để không dùng channel đã bị đóng ngay trước đó.
+            var channel = _channel;
+            if (!_channelReady || channel is null)
+            {
+                throw new InvalidOperationException($"Identity '{_appId}' chưa kết nối tới broker '{_brokerName}'.");
+            }
+
+            var body = JsonSerializer.SerializeToUtf8Bytes(envelope, envelope.GetType(), _json);
+            var properties = new BasicProperties { ContentType = "application/json" };
+
+            try
+            {
+                await channel.BasicPublishAsync(_options.Exchange, routingKey, mandatory: false, properties, body, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is RabbitMQ.Client.Exceptions.AlreadyClosedException
+                                           or RabbitMQ.Client.Exceptions.OperationInterruptedException
+                                           or ObjectDisposedException)
+            {
+                // Mất kết nối giữa lúc publish: coi như "chưa kết nối" (không đệm).
+                throw new InvalidOperationException($"Identity '{_appId}' mất kết nối khi đang gửi tới broker '{_brokerName}'.", ex);
+            }
         }
         finally
         {
@@ -122,6 +136,7 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
                     AutomaticRecoveryEnabled = false,
                     TopologyRecoveryEnabled = false,
                     RequestedConnectionTimeout = TimeSpan.FromSeconds(10),
+                    RequestedHeartbeat = TimeSpan.FromSeconds(10)
                 };
 
                 connection = await factory.CreateConnectionAsync(ct).ConfigureAwait(false);
@@ -136,32 +151,54 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
                 {
                     await ch.BasicQosAsync(0, (ushort)Math.Min(_options.Prefetch, ushort.MaxValue), false, ct).ConfigureAwait(false);
                 }
-
+                
+                try
+                {
+                    await ch.ExchangeDeclarePassiveAsync(_options.Exchange, ct).ConfigureAwait(false);
+                }
+                catch (RabbitMQ.Client.Exceptions.OperationInterruptedException ex) when (ex.ShutdownReason?.ReplyCode == 404)
+                {
+                    throw new ExchangeMissingException(
+                        $"Exchange '{_options.Exchange}' chưa tồn tại trên broker '{_brokerName}' (vhost '{_options.VirtualHost}'). " +
+                        "VMS phải tạo trước, hoặc tạo tay kiểu topic.", ex);
+                }
+                
                 // Hàng đợi riêng của identity: tên do server đặt, exclusive + auto-delete → biến mất khi kết nối đóng.
-                // 🟠 Giả định (SRS không quy định tên/độ bền hàng đợi): đủ cho simulator, xem lại nếu VMS cần lệnh đã gửi lúc VPU đang tắt.
+                // Giả định: đủ cho simulator, xem lại nếu VMS cần lệnh đã gửi lúc VPU đang tắt.
                 var queue = (await ch.QueueDeclareAsync(queue: string.Empty, durable: false, exclusive: true, autoDelete: true,
                     cancellationToken: ct).ConfigureAwait(false)).QueueName;
-
-                // SRS IF-MQ-3 / FR-CMD-1: outbound.vpu.<app_id>.#  (xem DATA CONFLICT #8 về .# và .*, chưa xác nhận với VMS)
+                
                 await ch.QueueBindAsync(queue, _options.Exchange, $"outbound.vpu.{_appId}.#", cancellationToken: ct).ConfigureAwait(false);
 
                 var consumer = new AsyncEventingBasicConsumer(ch);
-                consumer.ReceivedAsync += (_, args) => OnReceivedAsync(ch, args);
+                consumer.ReceivedAsync += (_, args) => OnReceivedAsync(ch, args, ct);
                 await ch.BasicConsumeAsync(queue, _options.AutoAck, consumer, ct).ConfigureAwait(false);
 
                 _channel = ch;
-                _connected = true;
-                delay = _options.ReconnectMin;   // kết nối thành công → backoff về đầu
+                _channelReady = true;
+                var connectedAt = _time.GetTimestamp(); // backoff chỉ về đầu khi kết nối sống đủ lâu
                 _logger.LogInformation("Identity {AppId} connected to broker '{Broker}' ({Target})", _appId, _brokerName, _options);
 
                 await InvokeOnConnectedAsync(ct).ConfigureAwait(false);
-
+                _connected = true;
+                
                 await lost.Task.WaitAsync(ct).ConfigureAwait(false);   // chặn tới khi mất kết nối hoặc bị huỷ
+
+                // Chỉ về backoff đầu nếu kết nối đã sống đủ lâu; kết nối chập chờn thì backoff tiếp tục tăng.
+                if (_time.GetElapsedTime(connectedAt) >= StableConnection)
+                {
+                    delay = _options.ReconnectMin;
+                }
                 _logger.LogWarning("Identity {AppId} lost connection to broker '{Broker}'", _appId, _brokerName);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
+            }
+            catch (ExchangeMissingException ex)
+            {
+                // Không truyền ex vào LogWarning để không in stack trace mỗi lần thử lại.
+                _logger.LogWarning("Identity {AppId}: {Message} Thử lại sau {Delay}.", _appId, ex.Message, delay);
             }
             catch (Exception ex)
             {
@@ -171,13 +208,16 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
             finally
             {
                 _connected = false;
+                _channelReady = false;
                 _channel = null;
                 await CloseQuietlyAsync(channel, connection).ConfigureAwait(false);
             }
 
             try
             {
-                await Task.Delay(delay, _time, ct).ConfigureAwait(false);
+                // Cộng thêm 0 đến 20% ngẫu nhiên: nhiều identity cùng rớt sẽ không nối lại cùng một lúc.
+                var wait = delay + TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * 0.2 * delay.TotalMilliseconds);
+                await Task.Delay(wait, _time, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -188,32 +228,52 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
         }
     }
 
-    private async Task InvokeOnConnectedAsync(CancellationToken ct)
-    {
-        var callback = OnConnectedAsync;
-        if (callback is null) return;
+    private Task InvokeOnConnectedAsync(CancellationToken ct)
+        => OnConnectedAsync?.Invoke(ct) ?? Task.CompletedTask;
 
-        try
-        {
-            await callback(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // Hợp đồng IBrokerSession: callback lỗi không được làm sập vòng reconnect.
-            _logger.LogError(ex, "OnConnected callback of identity {AppId} failed", _appId);
-        }
-    }
-
-    private async Task OnReceivedAsync(IChannel channel, BasicDeliverEventArgs args)
+    private async Task OnReceivedAsync(IChannel channel, BasicDeliverEventArgs args, CancellationToken ct)
     {
-        // CHƯA có bộ xử lý lệnh ở bước heartbeat: chỉ ghi log để thấy lệnh VMS tới đúng identity.
-        // Khi làm Giai đoạn 2 (add-task...), thêm callback nhận lệnh vào IBrokerSession rồi gọi ở đây.
-        _logger.LogDebug("Identity {AppId} received message on '{RoutingKey}' ({Bytes} bytes), no handler yet",
-            _appId, args.RoutingKey, args.Body.Length);
+        // Body của thư viện chỉ hợp lệ trong lúc xử lý sự kiện này (bộ nhớ được tái sử dụng) → sao chép trước khi giao đi.
+        var message = new InboundMessage(args.RoutingKey, args.Body.ToArray());
+        var handler = OnMessageAsync;
+
+        if (handler is null)
+        {
+            _logger.LogDebug("Identity {AppId} received message on '{RoutingKey}' ({Bytes} bytes), no handler set",
+                _appId, message.RoutingKey, message.Body.Length);
+        }
+        else
+        {
+            try
+            {
+                await handler(message, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Đang tắt session: bỏ qua.
+            }
+            catch (Exception ex)
+            {
+                // Nuốt lỗi: một bản tin hỏng không được làm đứt consumer hay vòng reconnect. Không log body.
+                _logger.LogError(ex, "Identity {AppId}: handler failed on '{RoutingKey}' ({Bytes} bytes); message dropped",
+                    _appId, message.RoutingKey, message.Body.Length);
+            }
+        }
 
         if (!_options.AutoAck)
         {
-            await channel.BasicAckAsync(args.DeliveryTag, multiple: false).ConfigureAwait(false);
+            try
+            {
+                await channel.BasicAckAsync(args.DeliveryTag, multiple: false, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is RabbitMQ.Client.Exceptions.AlreadyClosedException
+                                           or RabbitMQ.Client.Exceptions.OperationInterruptedException
+                                           or ObjectDisposedException
+                                           or OperationCanceledException)
+            {
+                // Kênh đã đóng giữa chừng: broker sẽ tự gửi lại bản tin chưa ack cho kết nối kế tiếp. Không phải lỗi.
+                _logger.LogDebug(ex, "Identity {AppId}: cannot ack message on '{RoutingKey}', channel closed", _appId, message.RoutingKey);
+            }
         }
     }
 
@@ -251,7 +311,8 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
             }
         }
 
-        _stop.Dispose();
-        _publishLock.Dispose();
+        if (_runTask is null || _runTask.IsCompleted) _stop.Dispose();
     }
+    // Exchange chưa tồn tại là lỗi cấu hình/môi trường đã biết rõ nguyên nhân: log một dòng, không in stack trace.
+    private sealed class ExchangeMissingException(string message, Exception inner) : Exception(message, inner);
 }

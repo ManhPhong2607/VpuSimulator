@@ -6,9 +6,9 @@ using VpuSimulator.Application.Options;
 namespace VpuSimulator.Infrastructure.Messaging;
 
 /// <summary>
-/// Tạo <see cref="RabbitMqBrokerSession"/> theo tên target trong cấu hình. Đây là chỗ DUY NHẤT biết
+/// Tạo RabbitMqBrokerSession theo tên target trong cấu hình. Đây là chỗ DUY NHẤT biết
 /// "tên target → host/vhost/exchange nào", nên đổi đích bắn heartbeat chỉ là đổi cấu hình.
-/// Tạo session KHÔNG kết nối; chỉ <c>StartAsync</c> mới bắt đầu.
+/// Tạo session KHÔNG kết nối; chỉ StartAsync mới bắt đầu.
 /// </summary>
 public sealed class RabbitMqBrokerFactory : IMessageBrokerFactory
 {

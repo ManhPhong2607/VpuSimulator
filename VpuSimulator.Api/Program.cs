@@ -1,14 +1,12 @@
 ﻿using System.Text.Json;
 using VpuSimulator.Api.Hosting;
+using VpuSimulator.Application.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddVpuMessaging(builder.Configuration);
 
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.Listen(System.Net.IPAddress.Parse("127.0.0.1"), 18080);
-});
+builder.WebHost.UseUrls(builder.Configuration["Api:Listen"] ?? "http://127.0.0.1:18080");
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -21,28 +19,43 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Phục vụ Single-File Static Console nhúng sẵn theo ràng buộc CON-5
+// Phục vụ Single-File Static Console nhúng sẵn
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // Health check routes
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", uptime = Environment.TickCount64 / 1000, version = "1.0.0" }));
-app.MapGet("/readyz", () => Results.Ok(new { status = "ready" }));
+app.MapGet("/readyz", (IdentityLifecycleService identities) =>
+{
+    var statuses = identities.GetStatuses();
+    var report = ReadinessEvaluator.Evaluate(statuses);
+    var body = new
+    {
+        status = report.IsReady ? "ready" : "not_ready",
+        reasons = report.Reasons,
+        identities = report.Identities,
+        connected = report.Connected,
+        details = statuses,
+    };
+    return report.IsReady ? Results.Ok(body) : Results.Json(body, statusCode: StatusCodes.Status503ServiceUnavailable);
+});
 
-// Server-Sent Events endpoint chuẩn hóa theo contract v3
+// Server-Sent Events endpoint chuẩn hóa theo contract
 app.MapGet("/api/v1/stream", async (HttpContext ctx, CancellationToken ct) =>
 {
-    ctx.Response.Headers.Append("Content-Type", "text/event-stream");
-    ctx.Response.Headers.Append("Cache-Control", "no-cache");
-    ctx.Response.Headers.Append("Connection", "keep-alive");
-
-    while (!ct.IsCancellationRequested)
+    ctx.Response.ContentType = "text/event-stream";
+    ctx.Response.Headers.CacheControl = "no-cache";
+    try
     {
-        var heartbeat = new { type = "heartbeat", timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }; //Heartbeat của console, k phải 
-        await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(heartbeat)}\n\n", ct);
-        await ctx.Response.Body.FlushAsync(ct);
-        await Task.Delay(5000, ct);
+        while (!ct.IsCancellationRequested)
+        {
+            var hb = new { type = "heartbeat", timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+            await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(hb)}\n\n", ct);
+            await ctx.Response.Body.FlushAsync(ct);
+            await Task.Delay(5000, ct);
+        }
     }
+    catch (OperationCanceledException) { /* client ngắt kết nối */ }
 });
 
 // Fallback SPA route cho Next.js Console client-side routing

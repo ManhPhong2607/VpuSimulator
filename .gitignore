@@ -58,7 +58,6 @@ project.fragment.lock.json
 .nuget/
 
 # ---- Secrets & cấu hình cục bộ (KHÔNG commit) ----
-# appsettings.json và appsettings.Development.json vẫn được commit (chỉ chứa giá trị mặc định, không có secret).
 appsettings.*.local.json
 appsettings.Local.json
 secrets.json
@@ -108,5 +107,7 @@ desktop.ini
 appsettings.Development.json
 docker-compose.rabbitmq.yml
 
+tests/
 VpuSimulator.Application.Tests/
 VpuSimulator.ArchitectureTests/
+VpuSimulator.Infrastructure.Tests/
