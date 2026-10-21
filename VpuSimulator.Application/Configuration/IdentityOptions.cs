@@ -1,6 +1,6 @@
 namespace VpuSimulator.Application.Options;
 
-//Cấu hình 1 identity — SRS bảng cấu hình identities[].app_id / heartbeat (+ broker là mở rộng)
+//Cấu hình 1 identity — identities[].app_id / heartbeat (+ broker là mở rộng)
 public sealed class IdentityOptions
 {
     //Bắt buộc, khác rỗng, duy nhất
@@ -8,7 +8,7 @@ public sealed class IdentityOptions
 
     /// <summary>
     /// Chu kỳ heartbeat dạng duration (500ms, 30s, 5m, 6h)
-    /// Để trống hoặc ≤ 0 nghĩa là 30 s (SRS bảng cấu hình)
+    /// Để trống hoặc ≤ 0 nghĩa là 30 s
     /// </summary>
     public string? Heartbeat { get; set; }
     

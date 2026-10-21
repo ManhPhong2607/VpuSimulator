@@ -22,10 +22,16 @@ public sealed record ProcessStatusDetail(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("vps")] string Vps);
 
+/// <summary>Phần detail của status cấp task: {"status":"running","vps":""} (SRS 3.1.5).</summary>
+public sealed record TaskStatusDetail(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("vps")] string Vps);
+
 /// <summary>Factory dựng các bản tin status cấp process (scope process-unit, uuid = app id).</summary>
 public static class StatusMessages
 {
     private const string ProcessScope = "process-unit";
+    private const string TaskScope = "task-unit";
 
     public static StatusMessage ProcessRunning(string appId, DateTimeOffset now) =>
         Process(appId, now, "status", new ProcessStatusDetail("running", appId));
@@ -35,6 +41,19 @@ public static class StatusMessages
 
     public static StatusMessage Heartbeat(string appId, DateTimeOffset now) =>
         Process(appId, now, "heartbeat", detail: null);
+
+    /// <summary>Status cấp task: scope task-unit, uuid = task id (không phải app id). Vẫn phát trên routing key status của identity (IF-MQ-4).</summary>
+    public static StatusMessage TaskRunning(string taskId, DateTimeOffset now) => ForTask(taskId, now, "running");
+
+    public static StatusMessage TaskFailed(string taskId, DateTimeOffset now) => ForTask(taskId, now, "failed");
+
+    private static StatusMessage ForTask(string taskId, DateTimeOffset now, string status) =>
+        new(AppId: string.Empty,
+            Detail: new TaskStatusDetail(status, string.Empty),
+            Scope: TaskScope,
+            Timestamp: now.ToUnixTimeSeconds(),
+            Type: "status",
+            Uuid: taskId);
 
     private static StatusMessage Process(string appId, DateTimeOffset now, string type, object? detail) =>
         new(AppId: string.Empty,

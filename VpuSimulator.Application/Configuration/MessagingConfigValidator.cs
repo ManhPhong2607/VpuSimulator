@@ -43,7 +43,11 @@ public static class MessagingConfigValidator
             {
                 errors.Add($"{path}:AppId '{identity.AppId}' bị trùng.");
             }
-
+            else if (!AppIdRules.IsValid(identity.AppId))
+            {
+                errors.Add($"{path}:AppId '{identity.AppId}' chỉ được gồm chữ, số, '-', '_' (tối đa {AppIdRules.MaxLength}).");
+            }
+            
             if (!string.IsNullOrWhiteSpace(identity.Heartbeat) && !DurationParser.TryParse(identity.Heartbeat, out _))
             {
                 errors.Add($"{path}:Heartbeat '{identity.Heartbeat}' không đúng cú pháp (ví dụ 500ms, 30s, 5m, 6h).");
