@@ -1,6 +1,6 @@
 using VpuSimulator.Application.Messaging;
 
-namespace VpuSimulator.Application.Interfaces;
+namespace VpuSimulator.Application.Interfaces.Messaging;
 
 /// <summary>
 /// 1 identity = 1 session broker riêng. Session kế thừa IMessageBroker để publish,

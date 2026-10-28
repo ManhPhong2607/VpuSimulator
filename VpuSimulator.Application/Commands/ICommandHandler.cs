@@ -1,4 +1,5 @@
 using VpuSimulator.Application.Interfaces;
+using VpuSimulator.Application.Interfaces.Messaging;
 using VpuSimulator.Application.Messaging;
 
 namespace VpuSimulator.Application.Commands;

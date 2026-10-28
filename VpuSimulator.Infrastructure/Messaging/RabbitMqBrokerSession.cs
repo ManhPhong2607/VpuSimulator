@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using VpuSimulator.Application.Interfaces;
+using VpuSimulator.Application.Interfaces.Messaging;
 using VpuSimulator.Application.Messaging;
 using VpuSimulator.Application.Options;
 
@@ -25,7 +26,7 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
     private readonly string _brokerName;
     private readonly string _appId;
     private readonly TimeProvider _time;
-    private readonly ILogger _logger;
+    private readonly ILogger _logger;   
     private readonly JsonSerializerOptions _json;
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _publishLock = new(1, 1);
@@ -83,6 +84,9 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentNullException.ThrowIfNull(envelope);
         
+        var body = JsonSerializer.SerializeToUtf8Bytes(envelope, envelope.GetType(), _json);
+        var properties = new BasicProperties { ContentType = "application/json" };
+        
         await _publishLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -92,9 +96,6 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
             {
                 throw new InvalidOperationException($"Identity '{_appId}' chưa kết nối tới broker '{_brokerName}'.");
             }
-
-            var body = JsonSerializer.SerializeToUtf8Bytes(envelope, envelope.GetType(), _json);
-            var properties = new BasicProperties { ContentType = "application/json" };
 
             try
             {

@@ -1,4 +1,4 @@
-namespace VpuSimulator.Application.Interfaces;
+namespace VpuSimulator.Application.Interfaces.Messaging;
 
 /// <summary>
 /// Tạo session broker theo tên target. "Target" = 1 bộ cấu hình kết nối (host, vhost, user, exchange...).
