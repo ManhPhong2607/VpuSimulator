@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using VpuSimulator.Api.Hosting;
 using VpuSimulator.Application.Identity;
+using VpuSimulator.Api.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -57,6 +58,8 @@ app.MapGet("/api/v1/stream", async (HttpContext ctx, CancellationToken ct) =>
     }
     catch (OperationCanceledException) { /* client ngắt kết nối */ }
 });
+// Control API: các endpoint đọc
+app.MapControlApiReadEndpoints();
 
 // Fallback SPA route cho Next.js Console client-side routing
 app.MapFallbackToFile("index.html");

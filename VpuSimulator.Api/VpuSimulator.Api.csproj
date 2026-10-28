@@ -17,10 +17,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Controllers\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\VpuSimulator.Application\VpuSimulator.Application.csproj" />
     <ProjectReference Include="..\VpuSimulator.EventBuilder\VpuSimulator.EventBuilder.csproj" />
     <ProjectReference Include="..\VpuSimulator.Infrastructure\VpuSimulator.Infrastructure.csproj" />
