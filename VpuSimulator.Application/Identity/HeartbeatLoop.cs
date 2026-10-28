@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Application.Interfaces;
+using VpuSimulator.Application.Interfaces.Messaging;
 using VpuSimulator.Application.Messaging;
 
 namespace VpuSimulator.Application.Identity;

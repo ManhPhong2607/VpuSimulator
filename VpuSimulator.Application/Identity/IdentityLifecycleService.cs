@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Application.Interfaces;
+using VpuSimulator.Application.Interfaces.Messaging;
 using VpuSimulator.Application.Messaging;
 using VpuSimulator.Application.Options;
 using VpuSimulator.Application.State;
+using VpuSimulator.Application.Scheduling;
 
 namespace VpuSimulator.Application.Identity;
 
@@ -42,14 +44,16 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
     private readonly Func<TimeSpan, TimeSpan>? _heartbeatJitter;
     private readonly IInboundMessageHandler? _inboundHandler;
     private readonly ITaskStore? _taskStore;
-
+    private readonly IUnitRegistry? _units;
+    
     public IdentityLifecycleService(
         IMessageBrokerFactory factory,
         TimeProvider time,
         ILoggerFactory? loggerFactory = null,
         Func<TimeSpan, TimeSpan>? heartbeatJitter = null,
         IInboundMessageHandler? inboundHandler = null,
-        ITaskStore? taskStore = null)
+        ITaskStore? taskStore = null,
+        IUnitRegistry? units = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(time);
@@ -60,6 +64,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         _heartbeatJitter = heartbeatJitter;
         _inboundHandler = inboundHandler;
         _taskStore = taskStore;
+        _units = units;
     }
 
     //Danh sách app_id đang chạy
@@ -176,6 +181,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         {
             _identities.TryRemove(new KeyValuePair<string, RunningIdentity>(appId, running));
             ClearTasks(appId);
+            _units?.ForgetIdentity(appId);
         }
         return true;
     }

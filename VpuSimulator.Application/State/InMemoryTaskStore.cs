@@ -8,12 +8,19 @@ public sealed class InMemoryTaskStore : ITaskStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, Dictionary<string, ParsedTask>> _byApp = new(StringComparer.Ordinal);
+    private readonly ITaskObserver? _observer;
 
+    public InMemoryTaskStore(ITaskObserver? observer = null)
+    {
+        _observer = observer;
+    }
+    
     public TaskApplyResult Upsert(string appId, ParsedTask task)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appId);
         ArgumentNullException.ThrowIfNull(task);
 
+        TaskApplyResult result;
         lock (_gate)
         {
             if (!_byApp.TryGetValue(appId, out var tasks))
@@ -24,14 +31,20 @@ public sealed class InMemoryTaskStore : ITaskStore
 
             tasks.TryGetValue(task.TaskId, out var previous);
             tasks[task.TaskId] = task;
-            return new TaskApplyResult(previous is null, task, Diff(previous, task));
+            result = new TaskApplyResult(previous is null, task, Diff(previous, task));
         }
+
+        _observer?.TaskApplied(appId, result);
+        return result;
     }
 
     public TaskApplyResult? Update(string appId, string taskId, Func<ParsedTask, ParsedTask> transform)
     {
         ArgumentNullException.ThrowIfNull(transform);
 
+        ArgumentNullException.ThrowIfNull(transform);
+
+        TaskApplyResult result;
         lock (_gate)
         {
             if (!_byApp.TryGetValue(appId, out var tasks) || !tasks.TryGetValue(taskId, out var previous))
@@ -41,8 +54,11 @@ public sealed class InMemoryTaskStore : ITaskStore
 
             var next = transform(previous);
             tasks[taskId] = next;
-            return new TaskApplyResult(false, next, Diff(previous, next));
+            result = new TaskApplyResult(false, next, Diff(previous, next));
         }
+
+        _observer?.TaskApplied(appId, result);
+        return result;
     }
 
     public IReadOnlyList<ParsedTask> Remove(string appId, IEnumerable<string> taskIds)
@@ -71,11 +87,17 @@ public sealed class InMemoryTaskStore : ITaskStore
             }
         }
 
+        if (removed.Count > 0)
+        {
+            _observer?.TasksRemoved(appId, removed);
+        }
+
         return removed;
     }
 
     public IReadOnlyList<ParsedTask> Clear(string appId)
     {
+        List<ParsedTask> removed;
         lock (_gate)
         {
             if (!_byApp.Remove(appId, out var tasks))
@@ -83,8 +105,15 @@ public sealed class InMemoryTaskStore : ITaskStore
                 return new List<ParsedTask>();
             }
 
-            return tasks.Values.OrderBy(t => t.TaskId, StringComparer.Ordinal).ToList();
+            removed = tasks.Values.OrderBy(t => t.TaskId, StringComparer.Ordinal).ToList();
         }
+
+        if (removed.Count > 0)
+        {
+            _observer?.TasksRemoved(appId, removed);
+        }
+
+        return removed;
     }
 
     public ParsedTask? Get(string appId, string taskId)
