@@ -14,7 +14,7 @@ public readonly record struct RuleChange(RuleKey Key, RuleChangeKind Kind);
 
 /// <param name="Created">true nếu task chưa tồn tại trước đó (task mới khởi động).</param>
 /// <param name="Current">Task sau khi áp dụng.</param>
-/// <param name="RuleChanges">So với task trước đó. Task mới thì mọi rule đều là <see cref="RuleChangeKind.Added"/>. Scheduler dùng để đồng bộ emission unit.</param>
+/// <param name="RuleChanges">So với task trước đó. Task mới thì mọi rule đều là RuleChangeKind.Added. Scheduler dùng để đồng bộ emission unit.</param>
 public sealed record TaskApplyResult(bool Created, ParsedTask Current, IReadOnlyList<RuleChange> RuleChanges);
 
 /// <summary>

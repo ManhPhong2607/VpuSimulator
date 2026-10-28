@@ -1,6 +1,6 @@
 ﻿using VpuSimulator.Domain;
 
-namespace VpuSimulator.Application.Interfaces;
+namespace VpuSimulator.Application.Interfaces.Simulation;
 
 public interface IRuleMetadataRegistry
 {

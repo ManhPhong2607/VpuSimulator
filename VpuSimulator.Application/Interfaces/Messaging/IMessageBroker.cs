@@ -1,7 +1,4 @@
-using System.Threading;
-using System.Threading.Tasks;
-
-namespace VpuSimulator.Application.Interfaces;
+namespace VpuSimulator.Application.Interfaces.Messaging;
 
 public interface IMessageBroker
 {
