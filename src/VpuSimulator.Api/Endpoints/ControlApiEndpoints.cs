@@ -1,5 +1,5 @@
-﻿using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using VpuSimulator.Api.Hosting;
 using VpuSimulator.Application.Commands;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Application.Scheduling;
@@ -10,7 +10,7 @@ namespace VpuSimulator.Api.Endpoints;
 /// <summary>Các endpoint ĐỌC của Control API (SRS 3.1.10). Chỉ đọc trạng thái, không thay đổi gì.</summary>
 public static class ControlApiEndpoints
 {
-    public static IEndpointRouteBuilder MapControlApiReadEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapControlApiEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/v1").WithTags("Control API");
 
@@ -19,6 +19,9 @@ public static class ControlApiEndpoints
         api.MapGet("/tasks", GetTasks);
         api.MapGet("/units", GetUnits);
 
+        api.MapDelete("/tasks", StopAllTasks);
+        api.MapPost("/units/{appId}/{task}/{roi}/trigger", TriggerUnit);
+        
         return app;
     }
 
@@ -26,22 +29,20 @@ public static class ControlApiEndpoints
         IdentityLifecycleService identities,
         IUnitRegistry units,
         CommandStats stats,
-        TimeProvider time)
+        TimeProvider time,
+        AppClock clock)
     {
         var statuses = identities.GetStatuses();
         var snapshots = units.Snapshots();
-
-        using var process = Process.GetCurrentProcess();
-        var startedAt = new DateTimeOffset(process.StartTime.ToUniversalTime());
-        var uptime = (long)Math.Max(0, (time.GetUtcNow() - startedAt).TotalSeconds);
+        
 
         return new StatusDto(
-            Identities: statuses.Count,
+            Identities: statuses.Count, 
             IdentitiesConnected: statuses.Count(s => s.IsConnected),
             Units: snapshots.Count,
             UnitsAuto: snapshots.Count(s => s.Auto),
             Seed: units.Seed.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            UptimeSeconds: uptime,
+            UptimeSeconds: clock.UptimeSeconds(time),
             EmittedTotal: snapshots.Sum(s => s.Emitted),
             NoMessageTotal: snapshots.Sum(s => s.NoMessage),
             PreconditionTotal: snapshots.Sum(s => s.Precondition),
@@ -89,7 +90,58 @@ public static class ControlApiEndpoints
         IUnitRegistry units,
         [FromQuery(Name = "app_id")] string? appId) =>
         units.Snapshots(appId).Select(ToUnitDto).ToList();
+    
+    // DELETE /api/v1/tasks?confirm=true: dừng mọi task của mọi identity, identity vẫn kết nối (SRS 3.1.10).
+    private static IResult StopAllTasks(
+        IdentityLifecycleService identities,
+        ITaskStore tasks,
+        ILoggerFactory loggerFactory,
+        [FromQuery] bool confirm = false)
+    {
+        if (!confirm)
+        {
+            return Results.BadRequest(new ErrorDto("Thao tác này dừng mọi task; cần thêm tham số confirm=true."));
+        }
 
+        var affected = 0;
+        var stopped = 0;
+        foreach (var appId in identities.AppIds.OrderBy(a => a, StringComparer.Ordinal))
+        {
+            var removed = tasks.Clear(appId);   // kho tự báo UnitRegistry gỡ các unit (giống stop-all của VMS)
+            if (removed.Count > 0)
+            {
+                affected++;
+                stopped += removed.Count;
+            }
+        }
+
+        loggerFactory.CreateLogger("ControlApi")
+            .LogInformation("Control API: DELETE /tasks dừng {Tasks} task của {Identities} identity", stopped, affected);
+
+        return Results.Ok(new StopTasksResultDto(affected, stopped));
+    }
+    
+    // POST /api/v1/units/{appID}/{task}/{roi}/trigger[?rule=]: phát một lần ngay (FR-SIM-4).
+    // 202 khi nhận; 409 khi unit không tồn tại hoặc đang phát (SRS 3.1.10). 🔵 ?rule= và 409 khi mơ hồ là đề xuất, chưa có trong SRS.
+    private static IResult TriggerUnit(
+        IUnitRegistry units,
+        string appId,
+        string task,
+        int roi,
+        [FromQuery] string? rule)
+    {
+        var result = units.Trigger(appId, task, roi, rule);
+
+        return result.Outcome switch
+        {
+            UnitTriggerOutcome.Accepted => Results.Accepted(value: ToRef(result.Matches[0])),
+            UnitTriggerOutcome.Busy => Results.Conflict(new ErrorDto($"Unit {result.Matches[0]} đang phát, thử lại sau.")),
+            UnitTriggerOutcome.Ambiguous => Results.Conflict(new ErrorDto(
+                $"Nhiều rule dùng roi {roi}; thêm ?rule=<tên rule>. Các rule: {string.Join(", ", result.Matches.Select(m => m.RuleName))}.")),
+            _ => Results.Conflict(new ErrorDto("Không có unit khớp (app_id, task, roi, rule).")),
+        };
+    }
+    
     // ---------------------------------------------------------------- ánh xạ
 
     private static TaskDto ToTaskDto(string appId, ParsedTask t) => new(
@@ -120,4 +172,6 @@ public static class ControlApiEndpoints
         s.TicksDropped,
         s.TicksDeferredByMinGap,
         s.TriggersRejected);
+    
+    private static UnitRefDto ToRef(UnitKey k) => new(k.AppId, k.TaskId, k.RoiId, k.RuleName);
 }

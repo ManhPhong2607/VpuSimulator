@@ -25,7 +25,9 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // Health check routes
-app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", uptime = Environment.TickCount64 / 1000, version = "1.0.0" }));
+app.MapGet("/healthz", (AppClock clock, TimeProvider time) =>
+    Results.Ok(new { status = "healthy", uptime = clock.UptimeSeconds(time), version = "1.0.0" }));
+
 app.MapGet("/readyz", (IdentityLifecycleService identities) =>
 {
     var statuses = identities.GetStatuses();
@@ -59,7 +61,7 @@ app.MapGet("/api/v1/stream", async (HttpContext ctx, CancellationToken ct) =>
     catch (OperationCanceledException) { /* client ngắt kết nối */ }
 });
 // Control API: các endpoint đọc
-app.MapControlApiReadEndpoints();
+app.MapControlApiEndpoints();
 
 // Fallback SPA route cho Next.js Console client-side routing
 app.MapFallbackToFile("index.html");

@@ -8,4 +8,5 @@ public sealed record AffectObjectConfig(
     IReadOnlyList<double> DimRatio,
     int MinArea,
     IReadOnlyList<string> Movement,
-    int Direction);
+    int Direction
+);

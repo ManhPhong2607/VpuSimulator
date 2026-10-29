@@ -19,6 +19,7 @@ public static class MessagingServiceCollectionExtensions
         services.AddSingleton(options);
         
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(new AppClock(TimeProvider.System.GetUtcNow()));   // truyền instance: tạo ngay lúc khởi động
         
         services.AddSingleton<IMessageBrokerFactory>(sp => new RabbitMqBrokerFactory(
             options.Brokers,

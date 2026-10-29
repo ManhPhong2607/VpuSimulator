@@ -56,7 +56,7 @@ public sealed class UnitRunner : IAsyncDisposable
     private long _ticksDeferred;
     private long _triggersRejected;
 
-    /// <param name="epoch">Số phiên khởi đầu. Nơi tạo unit giữ bộ đếm theo từng khoá và truyền vào (xem hướng dẫn).</param>
+    /// epoch: Số phiên khởi đầu. Nơi tạo unit giữ bộ đếm theo từng khoá và truyền vào
     public UnitRunner(
         UnitKey key,
         long seed,
@@ -90,8 +90,8 @@ public sealed class UnitRunner : IAsyncDisposable
     public UnitKey Key => _key;
 
     /// <summary>
-    /// Bắt đầu chạy. auto = true: lần phát đầu sau arm delay (FR-SIM-5). auto = false: đứng yên cho tới khi bật auto hoặc trigger.
-    /// Hàm này chạy đồng bộ tới await đầu tiên của vòng lặp, nên khi trả về thì timer đã được tạo (test dựa vào điều này).
+    /// Bắt đầu chạy. auto = true: lần phát đầu sau arm delay (FR-SIM-5). auto = false: đứng yên cho tới khi bật auto hoặc trigger
+    /// Hàm này chạy đồng bộ tới await đầu tiên của vòng lặp, nên khi trả về thì timer đã được tạo (test dựa vào điều này)
     /// </summary>
     public void Start(bool auto = true)
     {
@@ -111,8 +111,8 @@ public sealed class UnitRunner : IAsyncDisposable
     }
 
     /// <summary>
-    /// FR-SIM-3. Bật: lên lịch phát NGAY (không chờ arm delay), sang phiên mới: epoch tăng, Random dựng lại từ seed.
-    /// Tắt: ngừng phát nhưng giữ unit; lần phát đang chạy dở vẫn được hoàn tất. Trả về true nếu trạng thái thật sự đổi.
+    /// FR-SIM-3. Bật: lên lịch phát NGAY (không chờ arm delay), sang phiên mới: epoch tăng, Random dựng lại từ seed
+    /// Tắt: ngừng phát nhưng giữ unit; lần phát đang chạy dở vẫn được hoàn tất. Trả về true nếu trạng thái thật sự đổi
     /// </summary>
     public bool SetAuto(bool auto)
     {
@@ -148,7 +148,7 @@ public sealed class UnitRunner : IAsyncDisposable
         }
     }
 
-    /// <summary>FR-SIM-4. Phát một lần ngay, bất kể auto và bất kể min_gap. Bị từ chối khi unit đang phát.</summary>
+    /// <summary>FR-SIM-4. Phát một lần ngay, bất kể auto và bất kể min_gap. Bị từ chối khi unit đang phát</summary>
     public TriggerResult Trigger()
     {
         lock (_gate)
@@ -170,7 +170,7 @@ public sealed class UnitRunner : IAsyncDisposable
         }
     }
 
-    /// <summary>FR-SIM-9. Đổi profile lúc runtime: lần phát kế tiếp được tính lại từ lúc lần phát gần nhất kết thúc.</summary>
+    /// <summary>FR-SIM-9. Đổi profile lúc runtime: lần phát kế tiếp được tính lại từ lúc lần phát gần nhất kết thúc</summary>
     public void SetProfile(SimulationProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -184,7 +184,7 @@ public sealed class UnitRunner : IAsyncDisposable
         }
     }
 
-    /// <summary>FR-SIM-13. reset_timer (giây) của rule density; null hoặc ≤ 0 thì profile quyết định nhịp. Nhịp được tính lại ngay.</summary>
+    /// <summary>FR-SIM-13. reset_timer (giây) của rule density; null hoặc ≤ 0 thì profile quyết định nhịp. Nhịp được tính lại ngay</summary>
     public void SetResetTimer(double? seconds)
     {
         lock (_gate)
@@ -226,7 +226,7 @@ public sealed class UnitRunner : IAsyncDisposable
         }
     }
 
-    /// <summary>FR-SIM-15. Dừng: huỷ lần phát đang chạy (nếu có), không lên lịch lại. Gọi nhiều lần an toàn.</summary>
+    /// <summary>FR-SIM-15. Dừng: huỷ lần phát đang chạy (nếu có), không lên lịch lại. Gọi nhiều lần an toàn</summary>
     public async ValueTask DisposeAsync()
     {
         lock (_gate)

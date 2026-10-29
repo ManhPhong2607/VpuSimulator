@@ -58,3 +58,18 @@ public sealed record StatusDto(
     [property: JsonPropertyName("precondition_total")] long PreconditionTotal,
     [property: JsonPropertyName("errors_total")] long ErrorsTotal,
     [property: JsonPropertyName("commands")] IReadOnlyDictionary<string, long> Commands);
+    
+public sealed record StopTasksResultDto(
+    [property: JsonPropertyName("identities_affected")] int IdentitiesAffected,
+    [property: JsonPropertyName("tasks_stopped")] int TasksStopped);
+
+/// <summary>Lỗi theo SRS 3.1.10: {"error": thông điệp}.</summary>
+public sealed record ErrorDto(
+    [property: JsonPropertyName("error")] string Error);
+    
+/// <summary>Unit được tham chiếu trong phản hồi (vd 202 của trigger).</summary>
+public sealed record UnitRefDto(
+    [property: JsonPropertyName("app_id")] string AppId,
+    [property: JsonPropertyName("task")] string Task,
+    [property: JsonPropertyName("roi")] int Roi,
+    [property: JsonPropertyName("rule")] string Rule);

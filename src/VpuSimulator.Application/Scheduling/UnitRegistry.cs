@@ -18,13 +18,27 @@ public interface IUnitConfigSource
 /// <summary>Tạo hàm "phát một lần" cho một unit mới. Được gọi trong khoá của registry nên phải nhanh, không await.</summary>
 public delegate UnitEmitDelegate UnitEmitterFactory(UnitKey key, IUnitConfigSource config);
 
+public enum UnitTriggerOutcome
+{
+    Accepted,
+    Busy,        // unit đang phát 
+    NotFound,    // không có unit này (hoặc vừa bị gỡ)
+    Ambiguous,   // nhiều rule cùng roi mà không nói rõ rule nào
+}
+
+/// Matches Accepted/Busy: đúng một khoá. Ambiguous: các khoá trùng. NotFound: rỗng
+public sealed record UnitTriggerResult(UnitTriggerOutcome Outcome, IReadOnlyList<UnitKey> Matches);
+
 public interface IUnitRegistry : ITaskObserver
 {
     long Seed { get; }
 
     IReadOnlyList<UnitSnapshot> Snapshots(string? appId = null);
+    
+    //FR-SIM-4: phát một lần ngay, bất kể auto. ruleName null: chỉ hợp lệ khi (appId, task, roi) khớp đúng một unit
+    UnitTriggerResult Trigger(string appId, string taskId, int roiId, string? ruleName = null);
 
-    /// <summary>Gỡ identity: quên bộ đếm epoch của identity đó (FR-ID-6). Gọi SAU khi kho task đã Clear.</summary>
+    //Gỡ identity: quên bộ đếm epoch của identity đó. Gọi SAU khi kho task đã Clear
     void ForgetIdentity(string appId);
 }
 
@@ -183,6 +197,46 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
                 .ThenBy(s => s.Key.RuleName, StringComparer.Ordinal)
                 .ToList();
         }
+    }
+    
+    public UnitTriggerResult Trigger(string appId, string taskId, int roiId, string? ruleName = null)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+        ArgumentNullException.ThrowIfNull(taskId);
+
+        UnitKey key;
+        UnitRunner runner;
+        lock (_gate)
+        {
+            var matches = _units
+                .Where(kv => kv.Key.AppId == appId
+                             && kv.Key.TaskId == taskId
+                             && kv.Key.RoiId == roiId
+                             && (ruleName is null || kv.Key.RuleName == ruleName))
+                .OrderBy(kv => kv.Key.RuleName, StringComparer.Ordinal)
+                .ToList();
+
+            if (matches.Count == 0)
+            {
+                return new UnitTriggerResult(UnitTriggerOutcome.NotFound, []);
+            }
+
+            if (matches.Count > 1)
+            {
+                return new UnitTriggerResult(UnitTriggerOutcome.Ambiguous, matches.Select(m => m.Key).ToList());
+            }
+
+            key = matches[0].Key;
+            runner = matches[0].Value.Runner;
+        }
+
+        // Gọi ngoài khoá của registry: runner có khoá riêng.
+        return runner.Trigger() switch
+        {
+            TriggerResult.Accepted => new UnitTriggerResult(UnitTriggerOutcome.Accepted, [key]),
+            TriggerResult.RejectedBusy => new UnitTriggerResult(UnitTriggerOutcome.Busy, [key]),
+            _ => new UnitTriggerResult(UnitTriggerOutcome.NotFound, []),   // unit vừa bị gỡ giữa hai bước
+        };
     }
 
     /// <summary>Chờ các unit đã gỡ dừng hẳn. Dùng trong test và khi tắt.</summary>
