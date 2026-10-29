@@ -18,7 +18,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VpuSimulator.Application\VpuSimulator.Application.csproj" />
-    <ProjectReference Include="..\VpuSimulator.EventBuilder\VpuSimulator.EventBuilder.csproj" />
     <ProjectReference Include="..\VpuSimulator.Infrastructure\VpuSimulator.Infrastructure.csproj" />
     <ProjectReference Include="..\VpuSimulator.Rules\VpuSimulator.Rules.csproj" />
   </ItemGroup>
