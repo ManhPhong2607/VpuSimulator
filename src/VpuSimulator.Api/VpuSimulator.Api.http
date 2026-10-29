@@ -1,0 +1,16 @@
+@host = http://127.0.0.1:18080
+
+GET {{host}}/api/v1/status
+Accept: application/json
+
+###
+GET {{host}}/api/v1/identities
+Accept: application/json
+
+###
+GET {{host}}/api/v1/tasks
+Accept: application/json
+
+###
+GET {{host}}/api/v1/units?app_id=vpu
+Accept: application/json
