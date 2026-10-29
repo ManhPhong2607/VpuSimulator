@@ -1,4 +1,9 @@
 ﻿using VpuSimulator.Domain;
+using VpuSimulator.Domain.Entities;
+using VpuSimulator.Domain.Events;
+using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Domain.RuleContracts;
+using VpuSimulator.Domain.ValueObjects;
 using VpuSimulator.Rules.Common;
 
 namespace VpuSimulator.Rules.TrafficSignalViolation;
@@ -44,7 +49,7 @@ public sealed class TrafficSignalViolationEventBuilder : IEventPayloadBuilder
             State = 4,                                           // details.state = discarded
             VioTypeStr = "REDLIGHT",
             DetailsType = 2,                                     // đổi thành 2 (khác #7 giữ 4)
-            FollowUp = FollowUpKind.Discard,
+            FollowUpKind = FollowUpKind.Discard,
         };
         return new BuildResult(ev, new StateProposal[] { new ClearActiveFollowUp() });
     }
@@ -87,7 +92,7 @@ public sealed class TrafficSignalViolationEventBuilder : IEventPayloadBuilder
             State = (int)RandomStates[rng.Next(RandomStates.Length)],    // details.state: rút riêng, độc lập với header
             VioTypeStr = "REDLIGHT",
             DetailsType = 4,
-            FollowUp = null,
+            FollowUpKind = null,
         };
 
         return new BuildResult(ev, new StateProposal[]

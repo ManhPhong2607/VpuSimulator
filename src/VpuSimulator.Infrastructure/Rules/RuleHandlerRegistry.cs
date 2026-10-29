@@ -1,8 +1,9 @@
 ﻿using System.Reflection;
-using VpuSimulator.Application;
-using VpuSimulator.Domain;
+using VpuSimulator.Application.Interfaces.Simulation;
+using VpuSimulator.Domain.Enums;
+using VpuSimulator.Domain.RuleContracts;
 
-namespace VpuSimulator.Infrastructure;
+namespace VpuSimulator.Infrastructure.Rules;
 
 public sealed class RuleHandlerRegistry : IRuleHandlerRegistry
 {

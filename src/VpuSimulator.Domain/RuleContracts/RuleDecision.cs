@@ -1,6 +1,8 @@
 using VpuSimulator.Domain.Events;
+using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Domain.RuleContracts;
 
-namespace VpuSimulator.Domain.RuleContracts;
+namespace VpuSimulator.Domain;
 
 // Kết quả trả về từ IRuleHandler.Execute() - Thuần quyết định, không mang Output
 // Quyết định của handler: có phát không và có phải follow-up không. Không chứa sự kiện.

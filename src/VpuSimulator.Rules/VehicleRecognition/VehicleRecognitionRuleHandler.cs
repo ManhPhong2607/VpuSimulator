@@ -1,4 +1,6 @@
-﻿using VpuSimulator.Domain;
+using VpuSimulator.Domain;
+using VpuSimulator.Domain.Entities;
+using VpuSimulator.Domain.RuleContracts;
 
 namespace VpuSimulator.Rules.VehicleRecognition;
 

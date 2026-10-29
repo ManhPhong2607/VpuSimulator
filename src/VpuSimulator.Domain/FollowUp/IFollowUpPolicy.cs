@@ -1,3 +1,5 @@
+using VpuSimulator.Domain.Entities;
+
 namespace VpuSimulator.Domain.FollowUp;
 
 public interface IFollowUpPolicy
