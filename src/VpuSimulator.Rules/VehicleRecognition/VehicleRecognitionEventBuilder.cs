@@ -1,5 +1,10 @@
 ﻿using System.Text.Json;
 using VpuSimulator.Domain;
+using VpuSimulator.Domain.Entities;
+using VpuSimulator.Domain.Events;
+using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Domain.RuleContracts;
+using VpuSimulator.Domain.ValueObjects;
 using VpuSimulator.Rules.Common;
 
 namespace VpuSimulator.Rules.VehicleRecognition;

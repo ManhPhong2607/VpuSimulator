@@ -1,10 +1,9 @@
-namespace VpuSimulator.Domain;
+namespace VpuSimulator.Domain.Entities;
 
-public sealed class ActiveFollowUpState
-{
-    public required string EventKey { get; set; }
-    public required string Label { get; set; }
-    public required int ObjectType { get; set; }
-    public required int Tracker { get; set; }
-    public string? RefId { get; set; }
-}
+// Bất biến. Chỉ đổi bằng cách thay cả bản ghi, qua đề xuất SetActiveFollowUp/ClearActiveFollowUp
+public sealed record ActiveFollowUpState(
+    string EventKey,
+    string Label,
+    int ObjectType,
+    int Tracker,
+    string? RefId);

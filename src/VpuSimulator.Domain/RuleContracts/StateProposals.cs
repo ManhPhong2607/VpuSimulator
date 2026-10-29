@@ -1,4 +1,6 @@
-﻿namespace VpuSimulator.Domain.RuleContracts;
+﻿using VpuSimulator.Domain.Entities;
+
+namespace VpuSimulator.Domain.RuleContracts;
 
 // Tập đóng các thay đổi trạng thái. Chỉ được áp qua UnitRunner.TryCommit sau khi publish
 public abstract record StateProposal;
