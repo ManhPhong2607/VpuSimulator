@@ -1,6 +1,4 @@
-using System;
-
-namespace VpuSimulator.Domain;
+namespace VpuSimulator.Domain.Events;
 
 public abstract class RuleOutputEvent
 {

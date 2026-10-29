@@ -1,8 +1,9 @@
-using System.Collections.Generic;
+using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Domain.ValueObjects;
 
-namespace VpuSimulator.Domain;
+namespace VpuSimulator.Domain.Events;
 
-public sealed class ViolationOutput : RuleOutputEvent
+public sealed class ViolationEvent : RuleOutputEvent
 {
     public override int Type => 2;
     public int EventType { get; init; } = 2;
@@ -14,8 +15,9 @@ public sealed class ViolationOutput : RuleOutputEvent
     public string? ImageUrl { get; init; }
     public string? VideoUrl { get; init; }
     public IReadOnlyList<string>? ImageCtxtUrl { get; init; }
-    public object? Attributes { get; init; }
+    public AttributeItem? Attributes { get; init; }
     public string? RefId { get; init; }
     public int? State { get; init; }
     public string? VioTypeStr { get; init; }
+    public FollowUpKind? FollowUpKind { get; init; }
 }

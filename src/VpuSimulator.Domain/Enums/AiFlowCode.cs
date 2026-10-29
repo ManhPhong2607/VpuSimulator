@@ -1,4 +1,4 @@
-namespace VpuSimulator.Domain;
+namespace VpuSimulator.Domain.Enums;
 
 public enum AiFlowCode
 {

@@ -1,13 +1,12 @@
-namespace VpuSimulator.Domain;
-
-public enum FollowUpDecision
-{
-    Keep,
-    Deactivate,
-    Discard
-}
+namespace VpuSimulator.Domain.FollowUp;
 
 public interface IFollowUpPolicy
 {
-    FollowUpDecision Decide(string ruleName, ActiveFollowUpState currentState);
+    // Đúng 1 lần rút số khi rule có follow-up. Trả null = không follow-up.
+    FollowUpKind? Decide(
+        string ruleName,
+        ActiveFollowUpState active, 
+        Random rng);
 }
+
+public enum FollowUpKind { Deactivate, Discard }

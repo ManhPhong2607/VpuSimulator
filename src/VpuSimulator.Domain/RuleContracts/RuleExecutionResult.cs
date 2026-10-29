@@ -1,3 +1,5 @@
+using VpuSimulator.Domain.Events;
+
 namespace VpuSimulator.Domain;
 
 public enum RuleOutcome

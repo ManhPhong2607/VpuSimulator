@@ -1,4 +1,5 @@
 ﻿using VpuSimulator.Domain;
+using VpuSimulator.Domain.Enums;
 
 namespace VpuSimulator.Application.Interfaces.Simulation;
 

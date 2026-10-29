@@ -1,8 +1,8 @@
-using System.Collections.Generic;
+using VpuSimulator.Domain.ValueObjects;
 
-namespace VpuSimulator.Domain;
+namespace VpuSimulator.Domain.Events;
 
-public sealed class RecognitionOutput : RuleOutputEvent
+public sealed class RecognitionEvent : RuleOutputEvent
 {
     public override int Type => 3;
     public int EventType { get; init; } = 3;
@@ -16,8 +16,8 @@ public sealed class RecognitionOutput : RuleOutputEvent
     public string? VideoUrl { get; init; }
     public double? AccuracyRatio { get; init; } = 0;
     public int? AiFlowGroupType { get; init; } = 0;
-    public string? EventTypeString { get; init; }
-    public string? ProfileObjectId { get; init; }
+    public string? EventTypeString { get; init; } = null;
+    public int ProfileObjectId { get; init; } = 0;
     public IReadOnlyList<object>? Groups { get; init; }
-    public object? Attributes { get; init; }
+    public AttributeItem? Attributes  { get; init; }
 }
