@@ -10,7 +10,7 @@ namespace VpuSimulator.Domain
         // field chung rule_conf 
         public required int RoiId { get; init; }                    
         public required string Name { get; init; }
-        public required int ZoneType { get; init; }                  // "type" — tham khao, KHONG dung de dispatch
+        public int ZoneType { get; init; }                  // "type" — tham khao, KHONG dung de dispatch
         public IReadOnlyList<int>? RelatedRoi { get; init; }           // Traffic Light
         public required AiFlowCode? AiFlowCode { get; init; }
         public bool Enable { get; init; } = true;
