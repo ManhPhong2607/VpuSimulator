@@ -1,9 +1,16 @@
-﻿using VpuSimulator.Domain;
+using VpuSimulator.Domain;
 
 namespace VpuSimulator.Application.Scheduling;
 
 /// <summary>Thông tin scheduler đưa cho hàm phát một lần. PayloadRandom chỉ dùng trong lần phát này (mỗi unit chạy tuần tự).</summary>
-public sealed record UnitEmitContext(UnitKey Key, int Epoch, long RunToken, Random PayloadRandom, bool IsManual, DateTimeOffset Now);
+public sealed record UnitEmitContext(
+    UnitKey Key,
+    int Epoch,
+    long RunToken,
+    Random PayloadRandom,
+    bool IsManual,
+    DateTimeOffset Now,
+    Func<Action, bool>? TryCommit = null);
 
 /// <summary>
 /// Hàm "phát một lần". Phải tôn trọng cancellationToken: gỡ unit khi đang phát thì token bị huỷ (FR-SIM-15).

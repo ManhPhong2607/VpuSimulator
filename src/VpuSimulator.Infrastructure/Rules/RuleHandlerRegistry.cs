@@ -1,5 +1,6 @@
-﻿using System.Reflection;
+using System.Collections.Frozen;
 using VpuSimulator.Application.Interfaces.Simulation;
+using VpuSimulator.Domain;
 using VpuSimulator.Domain.Enums;
 using VpuSimulator.Domain.RuleContracts;
 
@@ -7,42 +8,57 @@ namespace VpuSimulator.Infrastructure.Rules;
 
 public sealed class RuleHandlerRegistry : IRuleHandlerRegistry
 {
-    private readonly Dictionary<string, List<IRuleHandler>> _byName;
+    private readonly FrozenDictionary<string, RuleDefinition[]> _byName;
 
-    public RuleHandlerRegistry(IEnumerable<IRuleHandler> handlers)
+    public RuleHandlerRegistry(IEnumerable<RuleDefinition> definitions)
     {
-        _byName = handlers
-            .GroupBy(h => h.Name, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+        ArgumentNullException.ThrowIfNull(definitions);
+        var all = definitions.ToList();
 
-        // Kiem tra luc khoi dong: khong de mo ho, loi cau hinh phai lo ra ngay chu khong doi toi luc chay.
+        foreach (var d in all)
+        {
+            ArgumentNullException.ThrowIfNull(d.Handler);
+            ArgumentNullException.ThrowIfNull(d.Builder);
+
+            if (d.EmittedGroup is < 1 or > 4)
+                throw new InvalidOperationException($"'{d.Handler.Name}': EmittedGroup {d.EmittedGroup} ngoài 1..4");
+
+            if (d.Handler.AiFlowCodes is { Count: 0 })
+                throw new InvalidOperationException($"'{d.Handler.Name}': AiFlowCodes là tập rỗng, định nghĩa này không bao giờ được chọn");
+        }
+
+        _byName = all
+            .GroupBy(d => d.Handler.Name, StringComparer.Ordinal)
+            .ToFrozenDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+        
+        // Kiểm tra lúc khởi động: không để mơ hồ, lỗi cấu hình phải lộ ra ngay
         foreach (var (name, list) in _byName)
         {
-            if (list.Count(h => h.AiFlowCodes is null) > 1)
-                throw new InvalidOperationException($"'{name}': co nhieu handler khong rang buoc aiFlowCode");
+            if (list.Count(d => d.Handler.AiFlowCodes is null) > 1)
+                throw new InvalidOperationException($"'{name}': có nhiều definition không ràng buộc aiFlowCode");
 
-            var dup = list.Where(h => h.AiFlowCodes is not null)
-                          .SelectMany(h => h.AiFlowCodes!)
+            var dup = list.Where(d => d.Handler.AiFlowCodes is not null)
+                          .SelectMany(d => d.Handler.AiFlowCodes!)
                           .GroupBy(c => c)
                           .FirstOrDefault(g => g.Count() > 1);
             if (dup != null)
-                throw new InvalidOperationException($"'{name}': aiFlowCode {dup.Key} duoc nhieu handler nhan");
+                throw new InvalidOperationException($"'{name}': aiFlowCode {dup.Key} được nhiều definition nhận");
         }
+        SupportedNames = _byName.Keys.Order(StringComparer.Ordinal).ToArray();
     }
 
-    public RuleHandlerRegistry(Assembly rulesAssembly)
-        : this(rulesAssembly.GetTypes()
-            .Where(t => t is { IsAbstract: false, IsInterface: false } && typeof(IRuleHandler).IsAssignableFrom(t))
-            .Select(t => (IRuleHandler)Activator.CreateInstance(t)!))
-    {
-    }
-
-    public IRuleHandler? Resolve(string name, AiFlowCode aiFlowCode)
+    public RuleDefinition? Resolve(string name, AiFlowCode? aiFlowCode)
     {
         if (!_byName.TryGetValue(name, out var list)) return null;
-        return list.FirstOrDefault(h => h.AiFlowCodes?.Contains(aiFlowCode) == true)
-               ?? list.FirstOrDefault(h => h.AiFlowCodes is null);
+
+        if (aiFlowCode.HasValue)
+        {
+            var match = list.FirstOrDefault(d => d.Handler.AiFlowCodes?.Contains(aiFlowCode.Value) == true);
+            if (match != null) return match;
+        }
+
+        return list.FirstOrDefault(d => d.Handler.AiFlowCodes is null);
     }
 
-    public IReadOnlyCollection<string> SupportedNames => _byName.Keys;
+    public IReadOnlyCollection<string> SupportedNames { get; }
 }

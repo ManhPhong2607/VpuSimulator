@@ -8,7 +8,8 @@ namespace VpuSimulator.Rules.TrafficSignalViolation;
 public sealed class TrafficSignalViolationRuleHandler : IRuleHandler
 {
     private readonly IFollowUpPolicy _policy;
-    public TrafficSignalViolationRuleHandler(IFollowUpPolicy policy) => _policy = policy;   // vì vậy không quét reflection được nữa
+    public TrafficSignalViolationRuleHandler(IFollowUpPolicy? policy = null) => 
+        _policy = policy ?? new FollowUp.DefaultFollowUpPolicy();
 
     public string Name => "Traffic Signal Violation";
 
