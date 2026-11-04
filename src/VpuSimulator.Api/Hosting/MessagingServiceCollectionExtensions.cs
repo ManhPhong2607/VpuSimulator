@@ -2,10 +2,15 @@ using VpuSimulator.Application.Commands;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Application.Interfaces;
 using VpuSimulator.Application.Interfaces.Messaging;
+using VpuSimulator.Application.Interfaces.Simulation;
 using VpuSimulator.Application.Options;
-using VpuSimulator.Application.State;
-using VpuSimulator.Infrastructure.Messaging;
 using VpuSimulator.Application.Scheduling;
+using VpuSimulator.Application.State;
+using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Infrastructure.Messaging;
+using VpuSimulator.Infrastructure.Persistence;
+using VpuSimulator.Infrastructure.Rules;
+using VpuSimulator.Rules;
 
 namespace VpuSimulator.Api.Hosting;
 
@@ -26,24 +31,38 @@ public static class MessagingServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<ILoggerFactory>()));
         
+        // Kho lưu trữ correlation liên kết dữ liệu giữa các bài toán (#1 và #6)
+        services.AddSingleton<ICorrelationStore, InMemoryCorrelationStore>();
+
+        // Registry tra cứu định nghĩa rule (kết hợp Handler + Builder + EmittedGroup)
+        services.AddSingleton<IRuleHandlerRegistry>(_ => new RuleHandlerRegistry(RuleCatalog.All));
+
         // Xử lý lệnh VMS: kho task trong bộ nhớ, bộ đếm, 5 handler, và dispatcher làm IInboundMessageHandler.
-        // Tham số isSupportedRule của handler để mặc định (null = chấp nhận mọi tên rule) cho tới khi có registry rule type.
         services.AddSingleton<CommandStats>();
         
-        // Scheduler: mỗi rule của mỗi task đang chạy là một unit. Hàm phát hiện là bản tạm; thay bằng emitter thật khi B xong.
+        // Scheduler: mỗi rule của mỗi task đang chạy là một emission unit. Sử dụng emitter thật.
         services.AddSingleton(sp => new UnitRegistry(
             SimulationSeed.Resolve(0),
             SimulationProfiles.Normal,
             TimeSpan.FromSeconds(5),
             sp.GetRequiredService<TimeProvider>(),
-            PlaceholderEmitter.Create(),
+            UnitEmitter.CreateFactory(
+                sp.GetRequiredService<IRuleHandlerRegistry>(),
+                appId => sp.GetRequiredService<IdentityLifecycleService>().TryGetBroker(appId),
+                sp.GetRequiredService<ICorrelationStore>(),
+                sp.GetService<ILogger<UnitRunner>>()),
             fixedPeriodSeconds: null,
             loggerFactory: sp.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IUnitRegistry>(sp => sp.GetRequiredService<UnitRegistry>());
         
         services.AddSingleton<ITaskStore>(sp => new InMemoryTaskStore(sp.GetRequiredService<UnitRegistry>()));
         
-        services.AddSingleton<ICommandHandler, AddTaskCommandHandler>();
+        services.AddSingleton<ICommandHandler>(sp => new AddTaskCommandHandler(
+            sp.GetRequiredService<ITaskStore>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<CommandStats>(),
+            isSupportedRule: name => sp.GetRequiredService<IRuleHandlerRegistry>().SupportedNames.Contains(name),
+            logger: sp.GetService<ILogger<AddTaskCommandHandler>>()));
         
         services.AddSingleton<ICommandHandler, EndTaskCommandHandler>();
         

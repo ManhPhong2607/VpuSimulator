@@ -21,7 +21,11 @@ public enum IdentityOpResult
     Failed,
 }
 
-public sealed record IdentityStatus(string AppId, bool IsConnected, long HeartbeatFailures, DateTimeOffset? LastHeartbeatAt);
+public sealed record IdentityStatus(
+    string AppId,
+    bool IsConnected,
+    long HeartbeatFailures,
+    DateTimeOffset? LastHeartbeatAt);
 
 /// <summary>
 /// Quản lý vòng đời các identity: thêm lúc khởi động hoặc runtime, gỡ, tắt có trật tự
@@ -32,20 +36,20 @@ public sealed record IdentityStatus(string AppId, bool IsConnected, long Heartbe
 /// </summary>
 public sealed class IdentityLifecycleService : IAsyncDisposable
 {
-    private static readonly TimeSpan DefaultHeartbeat = TimeSpan.FromSeconds(30);   // cấu hình: "≤ 0 nghĩa là 30s"
-    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);         // giới hạn thời gian gửi status stop
+    private static readonly TimeSpan DefaultHeartbeat = TimeSpan.FromSeconds(30); // cấu hình: "≤ 0 nghĩa là 30s"
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5); // giới hạn thời gian gửi status stop
 
     private readonly IMessageBrokerFactory _factory;
     private readonly TimeProvider _time;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<string, RunningIdentity> _identities = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim _gate = new(1, 1);   // thêm/gỡ identity hiếm, tuần tự hoá cho đơn giản
+    private readonly SemaphoreSlim _gate = new(1, 1); // thêm/gỡ identity hiếm, tuần tự hoá cho đơn giản
     private readonly Func<TimeSpan, TimeSpan>? _heartbeatJitter;
     private readonly IInboundMessageHandler? _inboundHandler;
     private readonly ITaskStore? _taskStore;
     private readonly IUnitRegistry? _units;
-    
+
     public IdentityLifecycleService(
         IMessageBrokerFactory factory,
         TimeProvider time,
@@ -106,25 +110,28 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Cannot create broker session for identity {AppId} on target {Broker}", appId, brokerName);
+                _logger.LogError(ex, "Cannot create broker session for identity {AppId} on target {Broker}", appId,
+                    brokerName);
                 return IdentityOpResult.Failed;
             }
 
             var registered = false;
+            CancellationTokenSource? cts = null;
             try
             {
-                var cts = new CancellationTokenSource();
+                cts = new CancellationTokenSource();
                 var loop = new HeartbeatLoop
-                    (session, 
-                    appId, 
-                    interval, 
+                (session,
+                    appId,
+                    interval,
                     _time, _loggerFactory.CreateLogger<HeartbeatLoop>(),
                     _heartbeatJitter?.Invoke(interval) ?? TimeSpan.Zero);
                 // Mỗi lần (re)subscribe → phát status running cấp process
                 session.OnConnectedAsync = async token =>
                 {
                     // Thứ tự bắt buộc: running trước, rồi heartbeat ngay, để VMS không phải chờ thêm một chu kỳ sau khi nối lại.
-                    await PublishProcessStatusAsync(session, appId, StatusMessages.ProcessRunning, token).ConfigureAwait(false);
+                    await PublishProcessStatusAsync(session, appId, StatusMessages.ProcessRunning, token)
+                        .ConfigureAwait(false);
                     await session.PublishAsync(RoutingKeys.Status(appId),
                         StatusMessages.Heartbeat(appId, _time.GetUtcNow()), token).ConfigureAwait(false);
                     loop.RecordHeartbeatSuccess();
@@ -133,12 +140,14 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                 // Phải đặt TRƯỚC StartAsync, để không mất bản tin nào ngay sau khi subscribe.
                 if (_inboundHandler is not null)
                 {
-                    session.OnMessageAsync = (message, token) => _inboundHandler.HandleAsync(appId, session, message, token);
+                    session.OnMessageAsync = (message, token) =>
+                        _inboundHandler.HandleAsync(appId, session, message, token);
                 }
+
                 await session.StartAsync(cancellationToken).ConfigureAwait(false);
 
-                var loopTask = loop.RunAsync(cts.Token);   // chạy tới await đầu tiên rồi trả Task về
-                    
+                var loopTask = loop.RunAsync(cts.Token); // chạy tới await đầu tiên rồi trả Task về
+
                 _identities[appId] = new RunningIdentity(session, cts, loop, loopTask);
                 registered = true;
                 return IdentityOpResult.Added;
@@ -152,6 +161,8 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
             {
                 if (!registered)
                 {
+                    cts?.Cancel(); // dừng vòng heartbeat nếu đã lỡ chạy
+                    cts?.Dispose();
                     await DisposeSessionAsync(session, appId).ConfigureAwait(false);
                 }
             }
@@ -171,7 +182,17 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(appId);
 
         if (!_identities.TryGetValue(appId, out var running)) return false;
-        if (Interlocked.Exchange(ref running.Stopping, 1) == 1) return false;   // đã có người đang gỡ
+        if (Interlocked.Exchange(ref running.Stopping, 1) == 1) return false;
+
+        try
+        {
+            ClearTasks(appId);
+            _units?.ForgetIdentity(appId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Identity {AppId}: lỗi khi gỡ task/unit, vẫn tiếp tục dừng identity", appId);
+        }
 
         try
         {
@@ -180,9 +201,8 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         finally
         {
             _identities.TryRemove(new KeyValuePair<string, RunningIdentity>(appId, running));
-            ClearTasks(appId);
-            _units?.ForgetIdentity(appId);
         }
+
         return true;
     }
 
@@ -253,10 +273,10 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         var removed = _taskStore.Clear(appId);
         if (removed.Count > 0)
         {
-            _logger.LogInformation("Identity {AppId}: đã xóa {Count} task", appId,  removed.Count);
+            _logger.LogInformation("Identity {AppId}: đã xóa {Count} task", appId, removed.Count);
         }
     }
-    
+
     private async Task DisposeSessionAsync(IBrokerSession session, string appId)
     {
         try
@@ -274,29 +294,36 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         interval = DefaultHeartbeat;
         if (string.IsNullOrWhiteSpace(text))
         {
-            return true;   // không cấu hình → mặc định 30s
+            return true; // không cấu hình → mặc định 30s
         }
 
         if (!DurationParser.TryParse(text, out var parsed))
         {
-            return false;   // không parse được → từ chối ("heartbeat parse được")
+            return false; // không parse được → từ chối ("heartbeat parse được")
         }
 
-        interval = parsed > TimeSpan.Zero ? parsed : DefaultHeartbeat;   // ≤ 0 nghĩa là 30s
+        interval = parsed > TimeSpan.Zero ? parsed : DefaultHeartbeat; // ≤ 0 nghĩa là 30s
         return true;
     }
 
-    private sealed class RunningIdentity(IBrokerSession session, CancellationTokenSource cts, HeartbeatLoop loop, Task loopTask)
+    private sealed class RunningIdentity(
+        IBrokerSession session,
+        CancellationTokenSource cts,
+        HeartbeatLoop loop,
+        Task loopTask)
     {
         public IBrokerSession Session { get; } = session;
         public CancellationTokenSource Cts { get; } = cts;
         public HeartbeatLoop Loop { get; } = loop;
         public Task LoopTask { get; } = loopTask;
-        public int Stopping; 
+        public int Stopping;
     }
-    
+
     public IReadOnlyList<IdentityStatus> GetStatuses() =>
         _identities.Select(kv => new IdentityStatus(kv.Key, kv.Value.Session.IsConnected,
                 kv.Value.Loop.PublishFailureCount, kv.Value.Loop.LastHeartbeatAt))
             .OrderBy(s => s.AppId, StringComparer.Ordinal).ToList();
+
+    public IMessageBroker? TryGetBroker(string appId) =>
+        _identities.TryGetValue(appId, out var running) ? running.Session : null;
 }

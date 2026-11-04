@@ -44,8 +44,8 @@ public sealed class UnitRunner : IAsyncDisposable
     private bool _manualRequested;
     private bool _recomputeRequested;
     private DateTimeOffset? _nextDue;
-    private DateTimeOffset? _lastEmitAt;       // lần phát THÀNH CÔNG (Emitted) cuối, dùng cho min_gap
-    private DateTimeOffset? _lastCompletion;   // lúc lần phát gần nhất kết thúc, dù kết quả gì
+    private DateTimeOffset? _lastEmitAt; // lần phát THÀNH CÔNG (Emitted) cuối, dùng cho min_gap
+    private DateTimeOffset? _lastCompletion; // lúc lần phát gần nhất kết thúc, dù kết quả gì
     private TaskCompletionSource _wake = NewWake();
     private Task? _loop;
     private long _emitted;
@@ -130,7 +130,8 @@ public sealed class UnitRunner : IAsyncDisposable
                 _runToken = NextRunToken();
                 (_payloadRandom, _scheduleRandom) = CreateRandoms();
                 //Bật: bắt đầu lịch ngay, lần phát đầu sau arm delay
-                var result = TickScheduleCalculator.ApplyMinGap(_time.GetUtcNow() + _armDelay, _lastEmitAt, _profile.MinGap);
+                var result =
+                    TickScheduleCalculator.ApplyMinGap(_time.GetUtcNow() + _armDelay, _lastEmitAt, _profile.MinGap);
                 if (result.Deferred)
                 {
                     _ticksDeferred++;
@@ -216,6 +217,7 @@ public sealed class UnitRunner : IAsyncDisposable
     }
 
     private static long NextRunToken() => Interlocked.Increment(ref s_nextRunToken);
+
     public UnitSnapshot Snapshot()
     {
         lock (_gate)
@@ -264,7 +266,7 @@ public sealed class UnitRunner : IAsyncDisposable
                 {
                     if (_wake.Task.IsCompleted)
                     {
-                        _wake = NewWake();   // tín hiệu cũ đã được xử lý bằng cách đọc lại trạng thái ngay dưới đây
+                        _wake = NewWake(); // tín hiệu cũ đã được xử lý bằng cách đọc lại trạng thái ngay dưới đây
                     }
 
                     if (_recomputeRequested)
@@ -288,7 +290,7 @@ public sealed class UnitRunner : IAsyncDisposable
 
                     if (waited == WaitResult.Woken)
                     {
-                        continue;   // trạng thái đã đổi: đọc lại
+                        continue; // trạng thái đã đổi: đọc lại
                     }
                 }
 
@@ -302,16 +304,18 @@ public sealed class UnitRunner : IAsyncDisposable
                     }
                     else if (!_auto || _nextDue is null || now < _nextDue.Value)
                     {
-                        continue;   // trạng thái đổi giữa lúc hết hạn và lúc lấy khoá
+                        continue; // trạng thái đổi giữa lúc hết hạn và lúc lấy khoá
                     }
 
                     _isEmitting = true;
                     if (!manual)
                     {
-                        _nextDue = null;   // đang phát: chưa có lần kế tiếp, tính lại khi kết thúc
+                        _nextDue = null; // đang phát: chưa có lần kế tiếp, tính lại khi kết thúc
                     }
 
-                    context = new UnitEmitContext(_key, _epoch, _runToken, _payloadRandom, manual, now);
+                    var runToken = _runToken;
+                    context = new UnitEmitContext(_key, _epoch, runToken, _payloadRandom, manual, now,
+                        commit => TryCommit(runToken, commit));
                 }
 
                 RuleOutcome outcome;
@@ -327,6 +331,12 @@ public sealed class UnitRunner : IAsyncDisposable
                     }
 
                     return;
+                }
+                catch (TimeoutException ex)
+                {
+                    // Broker chậm/treo: lỗi dự kiến, không cần stack trace
+                    _logger.LogWarning("Unit {Unit}: publish quá hạn ({Reason}), thử lại ở lần sau", _key, ex.Message);
+                    outcome = RuleOutcome.Error;
                 }
                 catch (Exception ex)
                 {
@@ -460,8 +470,10 @@ public sealed class UnitRunner : IAsyncDisposable
 
     private (Random Payload, Random Schedule) CreateRandoms() =>
     (
-        SimulationSeed.CreateRandom(_seed, _key.AppId, _key.TaskId, _key.RoiId, _key.RuleName, _epoch, SimulationSeed.PayloadStream),
-        SimulationSeed.CreateRandom(_seed, _key.AppId, _key.TaskId, _key.RoiId, _key.RuleName, _epoch, SimulationSeed.ScheduleStream)
+        SimulationSeed.CreateRandom(_seed, _key.AppId, _key.TaskId, _key.RoiId, _key.RuleName, _epoch,
+            SimulationSeed.PayloadStream),
+        SimulationSeed.CreateRandom(_seed, _key.AppId, _key.TaskId, _key.RoiId, _key.RuleName, _epoch,
+            SimulationSeed.ScheduleStream)
     );
 
     private void WakeLocked() => _wake.TrySetResult();
