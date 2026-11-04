@@ -19,6 +19,7 @@ public sealed class BrokerTargetOptions
     public bool AutoAck { get; set; } = true;
     public TimeSpan ReconnectMin { get; set; } = TimeSpan.FromSeconds(1);
     public TimeSpan ReconnectMax { get; set; } = TimeSpan.FromSeconds(30);
+    public TimeSpan PublishTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     public override string ToString() => $"{Host}:{Port}{VirtualHost} exchange={Exchange}";   // chỉ host:port, không có credential
 }

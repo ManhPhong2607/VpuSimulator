@@ -10,10 +10,7 @@ namespace VpuSimulator.Application.Interfaces.Messaging;
 /// Heartbeat KHÔNG biết gì về các chi tiết đó.
 /// </summary>
 public interface IBrokerSession : IMessageBroker, IAsyncDisposable
-{
-    //True khi session đang kết nối và subscribe xong
-    bool IsConnected { get; }
-
+{   
     /// <summary>
     /// Callback do bên dùng đặt trước StartAsync. Session phải gọi nó mỗi lần (re)subscribe
     /// thành công, kể cả sau reconnect — chính là thời điểm phát status running cấp process

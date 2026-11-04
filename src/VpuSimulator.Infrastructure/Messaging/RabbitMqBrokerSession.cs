@@ -83,36 +83,51 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentNullException.ThrowIfNull(envelope);
-        
+
         var body = JsonSerializer.SerializeToUtf8Bytes(envelope, envelope.GetType(), _json);
         var properties = new BasicProperties { ContentType = "application/json" };
-        
-        await _publishLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        // Token gộp: huỷ khi caller huỷ HOẶC khi quá PublishTimeout.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (_options.PublishTimeout > TimeSpan.Zero)
+            timeoutCts.CancelAfter(_options.PublishTimeout);
+        var ct = timeoutCts.Token;
+
         try
         {
-            // Đọc trạng thái SAU khi giữ khoá, để không dùng channel đã bị đóng ngay trước đó.
-            var channel = _channel;
-            if (!_channelReady || channel is null)
-            {
-                throw new InvalidOperationException($"Identity '{_appId}' chưa kết nối tới broker '{_brokerName}'.");
-            }
-
+            await _publishLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await channel.BasicPublishAsync(_options.Exchange, routingKey, mandatory: false, properties, body, cancellationToken)
-                    .ConfigureAwait(false);
+                // Đọc trạng thái SAU khi giữ khoá, để không dùng channel đã bị đóng ngay trước đó.
+                var channel = _channel;
+                if (!_channelReady || channel is null)
+                {
+                    throw new InvalidOperationException($"Identity '{_appId}' chưa kết nối tới broker '{_brokerName}'.");
+                }
+
+                try
+                {
+                    await channel.BasicPublishAsync(_options.Exchange, routingKey, mandatory: false, properties, body, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is RabbitMQ.Client.Exceptions.AlreadyClosedException
+                                            or RabbitMQ.Client.Exceptions.OperationInterruptedException
+                                            or ObjectDisposedException)
+                {
+                    // Mất kết nối giữa lúc publish: coi như "chưa kết nối" (không đệm).
+                    throw new InvalidOperationException($"Identity '{_appId}' mất kết nối khi đang gửi tới broker '{_brokerName}'.", ex);
+                }
             }
-            catch (Exception ex) when (ex is RabbitMQ.Client.Exceptions.AlreadyClosedException
-                                           or RabbitMQ.Client.Exceptions.OperationInterruptedException
-                                           or ObjectDisposedException)
+            finally
             {
-                // Mất kết nối giữa lúc publish: coi như "chưa kết nối" (không đệm).
-                throw new InvalidOperationException($"Identity '{_appId}' mất kết nối khi đang gửi tới broker '{_brokerName}'.", ex);
+                _publishLock.Release();
             }
         }
-        finally
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            _publishLock.Release();
+            // Không phải caller huỷ → là hết thời gian.
+            throw new TimeoutException(
+                $"Gửi tới broker '{_brokerName}' quá {_options.PublishTimeout.TotalSeconds:0.#}s (identity '{_appId}').");
         }
     }
 
