@@ -12,6 +12,7 @@ using VpuSimulator.Infrastructure.Messaging;
 using VpuSimulator.Infrastructure.Persistence;
 using VpuSimulator.Infrastructure.Rules;
 using VpuSimulator.Rules;
+using VpuSimulator.Rules.FollowUp;
 
 namespace VpuSimulator.Api.Hosting;
 
@@ -35,8 +36,11 @@ public static class MessagingServiceCollectionExtensions
         // Kho lưu trữ correlation liên kết dữ liệu giữa các bài toán (#1 và #6)
         services.AddSingleton<ICorrelationStore, InMemoryCorrelationStore>();
 
+        // Chính sách follow-up cho các rule có chu kỳ tiếp diễn (Illegal Stop, Traffic Signal Violation)
+        services.AddSingleton<IFollowUpPolicy, DefaultFollowUpPolicy>();
+
         // Registry tra cứu định nghĩa rule (kết hợp Handler + Builder + EmittedGroup)
-        services.AddSingleton<IRuleHandlerRegistry>(_ => new RuleHandlerRegistry(RuleCatalog.All));
+        services.AddSingleton<IRuleHandlerRegistry>(sp => new RuleHandlerRegistry(RuleCatalog.Create(sp.GetRequiredService<IFollowUpPolicy>())));
 
         // Xử lý lệnh VMS: kho task trong bộ nhớ, bộ đếm, 5 handler, và dispatcher làm IInboundMessageHandler.
         services.AddSingleton<CommandStats>();
