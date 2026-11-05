@@ -224,7 +224,7 @@ public sealed class UnitRunner : IAsyncDisposable
         {
             return new UnitSnapshot(
                 _key, _auto, _isEmitting, _epoch, _auto ? _nextDue : null, _lastEmitAt,
-                _emitted, _noMessage, _precondition, _errors, _ticksDropped, _ticksDeferred, _triggersRejected);
+                _emitted, _noMessage, _precondition, _errors, _ticksDropped, _ticksDeferred, _triggersRejected, _profile.Name);
         }
     }
 

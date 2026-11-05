@@ -1,22 +1,22 @@
 using System.Text.Json;
 
-namespace VpuSimulator.Application.Commands;
+namespace VpuSimulator.Application.Commands.Parsing;
 
 /// <summary>
-/// Parse task_list của add-task và từng Task (SRS 3.1.3, 3.1.4). Hàm thuần, không ghi log, không ném exception với dữ liệu xấu.
+/// Parse task_list của add-task và từng Task (SRS 3.1.3, 3.1.4). Hàm thuần, không ghi log, không ném exception với dữ liệu xấu
 ///
 /// Quy tắc theo SRS:
-/// - Tên trường không phân biệt hoa/thường; trường lạ ở mọi cấp bị bỏ qua (IF-CMD-1, IF-CMD-5).
+/// - Tên trường không phân biệt hoa/thường; trường lạ ở mọi cấp bị bỏ qua (IF-CMD-1, IF-CMD-5)
 /// - Phân biệt vắng mặt với rỗng/0 (IF-TASK-1).
-/// - Rule có name rỗng hoặc không hỗ trợ: bỏ riêng rule đó, task và các rule khác vẫn chạy (IF-RULE-1).
-/// - Rule sai kiểu dữ liệu: cả task bị từ chối (IF-RULE-2).
+/// - Rule có name rỗng hoặc không hỗ trợ: bỏ riêng rule đó, task và các rule khác vẫn chạy (IF-RULE-1)
+/// - Rule sai kiểu dữ liệu: cả task bị từ chối (IF-RULE-2)
 ///
 /// Bốn chỗ SRS im lặng, đang chọn cách an toàn nhất, cần nhóm xác nhận (xem ghi chú trong từng chỗ):
-/// (a) task thiếu task (id); (b) rule thiếu id; (c) hai rule trùng cả id lẫn name; (d) trường cấp task sai kiểu (ví dụ url là số).
+/// (a) task thiếu task (id); (b) rule thiếu id; (c) hai rule trùng cả id lẫn name; (d) trường cấp task sai kiểu (ví dụ url là số)
 /// </summary>
 public static class VmsTaskParser
 {
-    public static AddTaskParseResult ParseAddTask(JsonElement detail, Func<string, bool>? isSupportedRule = null)
+    public static AddTaskParseResult ParseAddTask(JsonElement detail, Func<string, int?, bool>? isSupportedRule = null)
     {
         JsonProps.GetString(detail, "appId", out var appId);
 
@@ -34,8 +34,8 @@ public static class VmsTaskParser
         return new AddTaskParseResult(results, appId, null);
     }
 
-    /// <param name="isSupportedRule">Tên rule có được hỗ trợ không. null = chấp nhận mọi tên không rỗng.</param>
-    public static TaskParseResult ParseTask(JsonElement element, Func<string, bool>? isSupportedRule = null)
+    /// <param name="isSupportedRule">Tên và aiFlowCode của rule có được hỗ trợ không, null = chấp nhận mọi tên không rỗng</param>
+    public static TaskParseResult ParseTask(JsonElement element, Func<string, int?, bool>? isSupportedRule = null)
     {
         if (element.ValueKind != JsonValueKind.Object)
         {
@@ -155,7 +155,7 @@ public static class VmsTaskParser
     private static RuleOutcome ParseRule(
         JsonElement element,
         int index,
-        Func<string, bool>? isSupportedRule,
+        Func<string, int?, bool>? isSupportedRule,
         out ParsedRule? rule,
         out SkippedRule? skipped,
         out string message)
@@ -199,9 +199,9 @@ public static class VmsTaskParser
             return RuleOutcome.Skip;
         }
 
-        if (isSupportedRule is not null && !isSupportedRule(name))
+        if (isSupportedRule is not null && !isSupportedRule(name, aiFlowCode))
         {
-            message = $"{path}: rule '{name}' chưa được hỗ trợ, bỏ rule này";
+            message = $"{path}: rule '{name}' (aiFlowCode: {aiFlowCode?.ToString() ?? "vắng"}) chưa được hỗ trợ, bỏ rule này";
             skipped = new SkippedRule(index, name, RuleSkipReason.Unsupported);
             return RuleOutcome.Skip;
         }

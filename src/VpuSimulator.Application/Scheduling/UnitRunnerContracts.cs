@@ -39,4 +39,5 @@ public sealed record UnitSnapshot(
     long Errors,
     long TicksDropped,
     long TicksDeferredByMinGap,
-    long TriggersRejected);
+    long TriggersRejected,
+    string Profile);

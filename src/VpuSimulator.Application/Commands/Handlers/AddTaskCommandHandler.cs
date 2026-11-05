@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using VpuSimulator.Application.Commands.Parsing;
 using VpuSimulator.Application.Messaging;
 using VpuSimulator.Application.State;
 
@@ -18,14 +19,14 @@ public sealed class AddTaskCommandHandler : ICommandHandler
     private readonly ITaskStore _store;
     private readonly TimeProvider _time;
     private readonly CommandStats _stats;
-    private readonly Func<string, bool>? _isSupportedRule;
+    private readonly Func<string, int?, bool>? _isSupportedRule;
     private readonly ILogger _logger;
 
     public AddTaskCommandHandler(
         ITaskStore store,
         TimeProvider time,
         CommandStats stats,
-        Func<string, bool>? isSupportedRule = null,
+        Func<string, int?, bool>? isSupportedRule = null,
         ILogger<AddTaskCommandHandler>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(store);

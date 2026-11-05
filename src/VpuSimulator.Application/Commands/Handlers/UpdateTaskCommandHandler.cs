@@ -16,7 +16,7 @@ public sealed class UpdateTaskCommandHandler : ICommandHandler
     public UpdateTaskCommandHandler(
         ITaskStore store,
         CommandStats stats,
-        Func<string, bool>? isSupportedRule = null,
+        Func<string, int?, bool>? isSupportedRule = null,
         ILogger<UpdateTaskCommandHandler>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(store);
