@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VpuSimulator.Application.Commands.Parsing;
 
 namespace VpuSimulator.Application.Commands;
 
@@ -11,7 +12,7 @@ namespace VpuSimulator.Application.Commands;
 public static class TaskMerge
 {
     /// <summary>Trả về kết quả parse của task sau khi trộn; bị từ chối nếu bản trộn có rule sai kiểu (khi đó bên gọi giữ task cũ).</summary>
-    public static TaskParseResult Apply(ParsedTask existing, JsonElement patch, Func<string, bool>? isSupportedRule = null)
+    public static TaskParseResult Apply(ParsedTask existing, JsonElement patch, Func<string, int?, bool>? isSupportedRule = null)
     {
         ArgumentNullException.ThrowIfNull(existing);
 

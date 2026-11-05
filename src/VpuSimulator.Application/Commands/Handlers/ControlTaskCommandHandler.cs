@@ -22,7 +22,7 @@ public sealed class ControlTaskCommandHandler : ICommandHandler
     public ControlTaskCommandHandler(
         ITaskStore store,
         CommandStats stats,
-        Func<string, bool>? isSupportedRule = null,
+        Func<string, int?, bool>? isSupportedRule = null,
         ILogger<ControlTaskCommandHandler>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(store);

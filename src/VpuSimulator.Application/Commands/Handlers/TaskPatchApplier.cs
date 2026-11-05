@@ -14,10 +14,10 @@ internal sealed class TaskPatchApplier
 {
     private readonly ITaskStore _store;
     private readonly CommandStats _stats;
-    private readonly Func<string, bool>? _isSupportedRule;
+    private readonly Func<string, int?, bool>? _isSupportedRule;
     private readonly ILogger _logger;
 
-    public TaskPatchApplier(ITaskStore store, CommandStats stats, Func<string, bool>? isSupportedRule, ILogger logger)
+    public TaskPatchApplier(ITaskStore store, CommandStats stats, Func<string, int?, bool>? isSupportedRule, ILogger logger)
     {
         _store = store;
         _stats = stats;

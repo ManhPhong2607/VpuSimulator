@@ -21,7 +21,9 @@ public static class ControlApiEndpoints
 
         api.MapDelete("/tasks", StopAllTasks);
         api.MapPost("/units/{appId}/{task}/{roi}/trigger", TriggerUnit);
-        
+        api.MapPost("/units/{appId}/{task}/{roi}/auto", SetUnitAuto);
+        api.MapPost("/profiles/apply", ApplyProfile);
+
         return app;
     }
 
@@ -34,10 +36,10 @@ public static class ControlApiEndpoints
     {
         var statuses = identities.GetStatuses();
         var snapshots = units.Snapshots();
-        
+
 
         return new StatusDto(
-            Identities: statuses.Count, 
+            Identities: statuses.Count,
             IdentitiesConnected: statuses.Count(s => s.IsConnected),
             Units: snapshots.Count,
             UnitsAuto: snapshots.Count(s => s.Auto),
@@ -90,7 +92,7 @@ public static class ControlApiEndpoints
         IUnitRegistry units,
         [FromQuery(Name = "app_id")] string? appId) =>
         units.Snapshots(appId).Select(ToUnitDto).ToList();
-    
+
     // DELETE /api/v1/tasks?confirm=true: dừng mọi task của mọi identity, identity vẫn kết nối (SRS 3.1.10).
     private static IResult StopAllTasks(
         IdentityLifecycleService identities,
@@ -107,7 +109,7 @@ public static class ControlApiEndpoints
         var stopped = 0;
         foreach (var appId in identities.AppIds.OrderBy(a => a, StringComparer.Ordinal))
         {
-            var removed = tasks.Clear(appId);   // kho tự báo UnitRegistry gỡ các unit (giống stop-all của VMS)
+            var removed = tasks.Clear(appId); // kho tự báo UnitRegistry gỡ các unit (giống stop-all của VMS)
             if (removed.Count > 0)
             {
                 affected++;
@@ -116,11 +118,12 @@ public static class ControlApiEndpoints
         }
 
         loggerFactory.CreateLogger("ControlApi")
-            .LogInformation("Control API: DELETE /tasks dừng {Tasks} task của {Identities} identity", stopped, affected);
+            .LogInformation("Control API: DELETE /tasks dừng {Tasks} task của {Identities} identity", stopped,
+                affected);
 
         return Results.Ok(new StopTasksResultDto(affected, stopped));
     }
-    
+
     // POST /api/v1/units/{appID}/{task}/{roi}/trigger[?rule=]: phát một lần ngay (FR-SIM-4).
     // 202 khi nhận; 409 khi unit không tồn tại hoặc đang phát (SRS 3.1.10). 🔵 ?rule= và 409 khi mơ hồ là đề xuất, chưa có trong SRS.
     private static IResult TriggerUnit(
@@ -135,13 +138,74 @@ public static class ControlApiEndpoints
         return result.Outcome switch
         {
             UnitTriggerOutcome.Accepted => Results.Accepted(value: ToRef(result.Matches[0])),
-            UnitTriggerOutcome.Busy => Results.Conflict(new ErrorDto($"Unit {result.Matches[0]} đang phát, thử lại sau.")),
+            UnitTriggerOutcome.Busy => Results.Conflict(
+                new ErrorDto($"Unit {result.Matches[0]} đang phát, thử lại sau.")),
             UnitTriggerOutcome.Ambiguous => Results.Conflict(new ErrorDto(
                 $"Nhiều rule dùng roi {roi}; thêm ?rule=<tên rule>. Các rule: {string.Join(", ", result.Matches.Select(m => m.RuleName))}.")),
             _ => Results.Conflict(new ErrorDto("Không có unit khớp (app_id, task, roi, rule).")),
         };
     }
-    
+
+    // POST /api/v1/units/{appID}/{task}/{roi}/auto[?rule=] body {"auto": true|false}: bật/tắt phát tự động (FR-SIM-3).
+    // 200; 404. 🔵 ?rule= và 409 khi mơ hồ là đề xuất, chưa có trong SRS. Trả giá trị HIỆU LỰC của auto.
+    private static IResult SetUnitAuto(
+        IUnitRegistry units,
+        string appId,
+        string task,
+        int roi,
+        [FromQuery] string? rule,
+        SetAutoRequest? body)
+    {
+        if (body?.Auto is null)
+        {
+            return Results.BadRequest(new ErrorDto("Thiếu trường bắt buộc: auto (true hoặc false)."));
+        }
+
+        var result = units.SetAuto(appId, task, roi, body.Auto.Value, rule);
+
+        return result.Outcome switch
+        {
+            UnitAutoOutcome.Applied => Results.Ok(new UnitAutoDto(
+                result.Matches[0].AppId, result.Matches[0].TaskId, result.Matches[0].RoiId, result.Matches[0].RuleName,
+                result.Auto)),
+            UnitAutoOutcome.Ambiguous => Results.Conflict(new ErrorDto(
+                $"Nhiều rule dùng roi {roi}; thêm ?rule=<tên rule>. Các rule: {string.Join(", ", result.Matches.Select(m => m.RuleName))}.")),
+            _ => Results.NotFound(new ErrorDto("Không có unit khớp (app_id, task, roi, rule).")),
+        };
+    }
+
+    // POST /api/v1/profiles/apply body {"profile", "app_id"?, "task"?}: đổi profile theo phạm vi (FR-SIM-9).
+    // 200 {units_updated}; 400. W-10: chỉ đổi unit đang tồn tại.
+    private static IResult ApplyProfile(
+        IUnitRegistry units,
+        ILoggerFactory loggerFactory,
+        ApplyProfileRequest? body)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.Profile))
+        {
+            return Results.BadRequest(new ErrorDto("Thiếu trường bắt buộc: profile."));
+        }
+
+        if (!SimulationProfiles.Defaults.TryGetValue(body.Profile, out var profile))
+        {
+            return Results.BadRequest(new ErrorDto(
+                $"Profile '{body.Profile}' không tồn tại. Hiện có: {string.Join(", ", SimulationProfiles.Defaults.Keys)}."));
+        }
+
+        if (body.Task is not null && body.AppId is null)
+        {
+            return Results.BadRequest(new ErrorDto("task cần đi kèm app_id."));
+        }
+
+        var updated = units.ApplyProfile(profile, body.AppId, body.Task);
+
+        loggerFactory.CreateLogger("ControlApi").LogInformation(
+            "Control API: áp profile {Profile} cho {Units} unit (app_id={AppId}, task={Task})",
+            profile.Name, updated, body.AppId ?? "*", body.Task ?? "*");
+
+        return Results.Ok(new ApplyProfileResultDto(updated));
+    }
+
     // ---------------------------------------------------------------- ánh xạ
 
     private static TaskDto ToTaskDto(string appId, ParsedTask t) => new(
@@ -171,7 +235,8 @@ public static class ControlApiEndpoints
         s.Errors,
         s.TicksDropped,
         s.TicksDeferredByMinGap,
-        s.TriggersRejected);
-    
+        s.TriggersRejected,
+        s.Profile);
+
     private static UnitRefDto ToRef(UnitKey k) => new(k.AppId, k.TaskId, k.RoiId, k.RuleName);
 }
