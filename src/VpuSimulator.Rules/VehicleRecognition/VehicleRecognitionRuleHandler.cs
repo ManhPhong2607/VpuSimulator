@@ -18,6 +18,8 @@ public sealed class VehicleRecognitionRuleHandler : IRuleHandler
     )
     {
         return ValueTask.FromResult(new RuleDecision(
-            rule.AffectObject is { Count: > 0 } ? RuleOutcome.Emitted : RuleOutcome.Precondition));
+            rule.AffectObject != null && rule.AffectObject.Count > 0
+            ? RuleOutcome.Emitted
+            : RuleOutcome.Precondition));
     }
 }
