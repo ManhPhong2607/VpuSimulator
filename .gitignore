@@ -112,3 +112,4 @@ VpuSimulator.Application.Tests/
 VpuSimulator.ArchitectureTests/
 VpuSimulator.Infrastructure.Tests/
 docs-local/
+*.Local.sln
