@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Application.Scheduling;
+namespace VpuSimulator.Application.Scheduling;
 
 //>Profile nhịp phát (FR-SIM-6). Trường không khai báo mặc định bằng 0 / false / null
 public sealed record SimulationProfile

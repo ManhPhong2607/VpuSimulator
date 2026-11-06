@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Application.Scheduling;
+namespace VpuSimulator.Application.Scheduling;
 
 /// <summary>
 /// Khoá của một emission unit (FR-SIM-2)

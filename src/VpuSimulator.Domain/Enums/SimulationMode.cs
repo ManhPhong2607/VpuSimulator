@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Domain.Enums;
+namespace VpuSimulator.Domain.Enums;
 
 public enum SimulationMode
 {

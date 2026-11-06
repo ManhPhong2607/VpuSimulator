@@ -1,4 +1,4 @@
-﻿using VpuSimulator.Domain.Enums;
+using VpuSimulator.Domain.Enums;
 using VpuSimulator.Domain.FollowUp;
 
 namespace VpuSimulator.Domain.RuleContracts

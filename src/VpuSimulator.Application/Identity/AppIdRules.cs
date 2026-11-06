@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Application.Identity;
+namespace VpuSimulator.Application.Identity;
 
 public static class AppIdRules
 {
