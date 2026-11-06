@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Api.Hosting;
+namespace VpuSimulator.Api.Hosting;
 
 /// <summary>Thời điểm tiến trình khởi động, ghi một lần lúc đăng ký DI.</summary>
 public sealed class AppClock(DateTimeOffset startedAt)

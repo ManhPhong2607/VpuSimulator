@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using VpuSimulator.Domain;
 using VpuSimulator.Domain.Entities;
 using VpuSimulator.Domain.Events;

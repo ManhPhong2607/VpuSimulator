@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Application.Identity;
+namespace VpuSimulator.Application.Identity;
 
 /// <summary>Kết quả đánh giá sẵn sàng. Reasons rỗng khi sẵn sàng.</summary>
 public sealed record ReadinessReport(bool IsReady, IReadOnlyList<string> Reasons, int Identities, int Connected);

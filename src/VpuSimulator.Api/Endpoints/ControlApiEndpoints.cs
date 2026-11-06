@@ -178,6 +178,7 @@ public static class ControlApiEndpoints
     // 200 {units_updated}; 400. W-10: chỉ đổi unit đang tồn tại.
     private static IResult ApplyProfile(
         IUnitRegistry units,
+        SimulationSettings settings,
         ILoggerFactory loggerFactory,
         ApplyProfileRequest? body)
     {
@@ -186,10 +187,10 @@ public static class ControlApiEndpoints
             return Results.BadRequest(new ErrorDto("Thiếu trường bắt buộc: profile."));
         }
 
-        if (!SimulationProfiles.Defaults.TryGetValue(body.Profile, out var profile))
+        if (!settings.Profiles.TryGetValue(body.Profile, out var profile))
         {
             return Results.BadRequest(new ErrorDto(
-                $"Profile '{body.Profile}' không tồn tại. Hiện có: {string.Join(", ", SimulationProfiles.Defaults.Keys)}."));
+                $"Profile '{body.Profile}' không tồn tại. Hiện có: {string.Join(", ", settings.Profiles.Keys)}."));
         }
 
         if (body.Task is not null && body.AppId is null)

@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Domain.Enums
+namespace VpuSimulator.Domain.Enums
 {
     // Kích thước khung hình để sinh bbox 
     public static class FrameSize
