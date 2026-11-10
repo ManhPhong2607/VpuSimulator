@@ -47,6 +47,12 @@ public interface IUnitRegistry : ITaskObserver
 
     //Gỡ identity: quên bộ đếm epoch của identity đó. Gọi SAU khi kho task đã Clear
     void ForgetIdentity(string appId);
+
+    //FR-ID-9: profile riêng của identity, dùng cho unit TẠO SAU. Không đổi unit đang có (W-10)
+    void SetIdentityProfile(string appId, SimulationProfile profile);
+
+    //Tên profile mà unit mới của identity sẽ dùng
+    string IdentityProfileName(string appId);
 }
 
 public enum UnitAutoOutcome
@@ -93,6 +99,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
     private readonly Dictionary<UnitKey, Entry> _units = new();
     private readonly Dictionary<UnitKey, int> _nextEpoch = new(); // epoch cho unit tạo lại với cùng khoá
     private readonly Dictionary<UnitKey, bool> _manualAuto = new();
+    private readonly Dictionary<string, SimulationProfile> _identityProfiles = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Task, byte> _disposing = new();
     private bool _disposed;
 
@@ -195,11 +202,34 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
             {
                 _nextEpoch.Remove(key);
             }
+
+            _identityProfiles.Remove(appId);
         }
 
         foreach (var runner in stale)
         {
             DisposeInBackground(runner);
+        }
+    }
+
+    public void SetIdentityProfile(string appId, SimulationProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        lock (_gate)
+        {
+            _identityProfiles[appId] = profile;
+        }
+    }
+
+    public string IdentityProfileName(string appId)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        lock (_gate)
+        {
+            return _identityProfiles.GetValueOrDefault(appId, _profile).Name;
         }
     }
 
@@ -391,8 +421,8 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
                     var epoch = _nextEpoch.GetValueOrDefault(key);
                     var config = new UnitConfig(view);
                     var runner = new UnitRunner(
-                        key, Seed, _profile, _armDelay, _time, _emitterFactory(key, config),
-                        resetTimer, epoch, _loggerFactory.CreateLogger<UnitRunner>());
+                        key, Seed, _identityProfiles.GetValueOrDefault(key.AppId, _profile), _armDelay, _time,
+                        _emitterFactory(key, config), resetTimer, epoch, _loggerFactory.CreateLogger<UnitRunner>());
                     _units[key] = new Entry(runner, config);
                     runner.Start(effective);
                     _logger.LogInformation("Unit {Unit} được tạo (epoch {Epoch}, auto {Auto})", key, epoch, effective);
