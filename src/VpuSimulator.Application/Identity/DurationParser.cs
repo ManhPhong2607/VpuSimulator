@@ -8,20 +8,21 @@ namespace VpuSimulator.Application.Identity;
 /// vì cấu hình heartbeat "≤ 0 nghĩa là 30 s" nên giá trị âm/0 phải parse được để áp dụng quy tắc đó).
 /// Scenario cũng cần hàm này để kiểm tra "heartbeat parse được"
 /// </summary>
-public static partial class DurationParser
+public static class DurationParser
 {
-    [GeneratedRegex(@"^\s*(-?\d+(?:\.\d+)?)\s*(ms|s|m|h)\s*$", RegexOptions.CultureInvariant)]
-    private static partial Regex Pattern();
+    private static readonly Regex Pattern = new(
+        @"^\s*(-?\d+(?:\.\d+)?)\s*(ms|s|m|h)\s*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static bool TryParse(string? text, out TimeSpan value)
     {
-        value = default;
+        value = TimeSpan.Zero;
         if (string.IsNullOrWhiteSpace(text))
         {
             return false;
         }
 
-        var match = Pattern().Match(text);
+        var match = Pattern.Match(text);
         if (!match.Success)
         {
             return false;

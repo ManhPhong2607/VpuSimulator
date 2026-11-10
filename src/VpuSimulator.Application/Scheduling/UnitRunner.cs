@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Domain;
 
@@ -315,7 +315,8 @@ public sealed class UnitRunner : IAsyncDisposable
 
                     var runToken = _runToken;
                     context = new UnitEmitContext(_key, _epoch, runToken, _payloadRandom, manual, now,
-                        commit => TryCommit(runToken, commit));
+                        commit => TryCommit(runToken, commit),
+                        CoalesceTimestamps: _profile.CoalesceTimestamps);
                 }
 
                 RuleOutcome outcome;

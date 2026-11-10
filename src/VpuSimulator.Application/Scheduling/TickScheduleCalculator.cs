@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Application.Scheduling;
+namespace VpuSimulator.Application.Scheduling;
 
 //Kết quả áp min_gap: thời điểm phát (có thể đã bị lùi) và cờ cho biết có bị lùi hay không (để đếm)
 public readonly record struct MinGapResult(DateTimeOffset Due, bool Deferred);

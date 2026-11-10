@@ -1,4 +1,4 @@
-﻿namespace VpuSimulator.Domain.RuleContracts
+namespace VpuSimulator.Domain.RuleContracts
 {
     public sealed record FixedValues(
         bool Enabled = false,

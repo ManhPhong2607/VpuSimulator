@@ -1,4 +1,4 @@
-﻿using VpuSimulator.Domain;
+using VpuSimulator.Domain;
 
 namespace VpuSimulator.Rules.Common;
 

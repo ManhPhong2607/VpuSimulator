@@ -1,4 +1,5 @@
 using VpuSimulator.Application.Commands;
+using VpuSimulator.Application.Configuration;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Application.Interfaces;
 using VpuSimulator.Application.Interfaces.Messaging;
@@ -21,7 +22,19 @@ public static class MessagingServiceCollectionExtensions
     // Đăng ký toàn bộ phần heartbeat/identity. Gọi 1 dòng trong Program.cs: builder.Services.AddVpuMessaging(builder.Configuration)
     public static IServiceCollection AddVpuMessaging(this IServiceCollection services, IConfiguration configuration)
     {
-        var options = configuration.GetSection("Messaging").Get<MessagingOptions>() ?? new MessagingOptions();
+        var options = configuration.GetStrict<MessagingOptions>("Messaging");
+
+        // Scheduler / mô phỏng: gộp, kiểm tra, dừng ngay nếu sai (FR-CFG-2)
+        var schedulerOptions = configuration.GetStrict<SchedulerOptions>("Scheduler");
+        var simulationOptions = configuration.GetStrict<SimulationOptions>("Simulation");
+        var profileOptions = configuration.GetStrict<Dictionary<string, ProfileOptions>>("Profiles");
+        if (!SimulationSettings.TryResolve(schedulerOptions, simulationOptions, profileOptions, out var settings, out var settingsErrors))
+        {
+            throw new InvalidOperationException(
+                "Cấu hình scheduler không hợp lệ:" + Environment.NewLine + string.Join(Environment.NewLine, settingsErrors));
+        }
+
+        services.AddSingleton(settings);
 
         services.AddSingleton(options);
 
@@ -47,9 +60,9 @@ public static class MessagingServiceCollectionExtensions
 
         // Scheduler: mỗi rule của mỗi task đang chạy là một emission unit. Sử dụng emitter thật.
         services.AddSingleton(sp => new UnitRegistry(
-            SimulationSeed.Resolve(0),
-            SimulationProfiles.Normal,
-            TimeSpan.FromSeconds(5),
+            SimulationSeed.Resolve(sp.GetRequiredService<SimulationSettings>().Seed),
+            sp.GetRequiredService<SimulationSettings>().DefaultProfile,
+            sp.GetRequiredService<SimulationSettings>().ArmDelay,
             sp.GetRequiredService<TimeProvider>(),
             UnitEmitter.CreateFactory(
                 sp.GetRequiredService<IRuleHandlerRegistry>(),

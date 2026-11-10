@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using VpuSimulator.Application.Interfaces.Simulation;
 using VpuSimulator.Domain.Enums;
 
