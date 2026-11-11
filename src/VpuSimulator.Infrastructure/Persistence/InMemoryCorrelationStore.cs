@@ -100,4 +100,24 @@ public sealed class InMemoryCorrelationStore : ICorrelationStore
     {
         foreach (var appId in _byAppId.Keys) Clear(appId);
     }
+
+    public IReadOnlyList<CorrelationEntry> List(string? appId = null)
+    {
+        var buckets = appId is null
+            ? _byAppId.ToArray()
+            : _byAppId.Where(kv => kv.Key == appId).ToArray();
+
+        var result = new List<CorrelationEntry>();
+        foreach (var (id, bucket) in buckets)
+        {
+            lock (bucket.Gate)
+            {
+                foreach (var key in bucket.Items.Where(kv => IsExpired(kv.Value)).Select(kv => kv.Key).ToList())
+                    bucket.Items.Remove(key);
+
+                result.AddRange(bucket.Items.Select(kv => new CorrelationEntry(id, kv.Key, kv.Value.Value, kv.Value.WrittenAt)));
+            }
+        }
+        return result.OrderByDescending(e => e.WrittenAt).ToList();
+    }
 }
