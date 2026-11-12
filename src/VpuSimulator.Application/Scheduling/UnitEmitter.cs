@@ -142,7 +142,7 @@ public static class UnitEmitter
 
                 // Dựng wire envelope
                 var stamp = context.CoalesceTimestamps ? TimestampCoalescer.FloorToSecond(context.Now) : context.Now;
-                var envelope = EnvelopeMapper.Map(unit.AppId, unit.TaskId, stamp, build.Event);;
+                var envelope = EnvelopeMapper.Map(unit.AppId, unit.TaskId, stamp, build.Event);
 
                 var routingKey = RoutingKeys.Data(unit.TaskId);
                 await broker.PublishAsync(routingKey, envelope, cancellationToken).ConfigureAwait(false);

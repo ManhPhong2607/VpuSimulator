@@ -14,8 +14,21 @@ public static class TickScheduleCalculator
     /// Density: reset_timer &gt; 0 thì phát đúng mỗi reset_timer giây, bỏ qua interval, jitter và ramp (FR-SIM-13); không rút số ngẫu nhiên
     /// Còn lại: interval + jitter_min + U[0, jitter_max − jitter_min) (FR-SIM-7). Chỉ rút số khi khoảng jitter &gt; 0,
     /// để số lần rút của một unit chỉ phụ thuộc cấu hình, không phụ thuộc thời gian
-    /// </summary>
-    public static TimeSpan NextDelay(SimulationProfile profile, double? resetTimerSeconds, Random random)
+    /// </summary
+    public static double? RampRate(SimulationProfile profile, TimeSpan elapsed)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (profile.RampDuration is not { } duration || profile.RampFrom is not { } start || profile.RampTo is not { } end)
+        {
+            return null;
+        }
+
+        var progress = Math.Clamp(elapsed.TotalSeconds / duration.TotalSeconds, 0d, 1d);
+        return start + (end - start) * progress;
+    }
+    
+    public static TimeSpan NextDelay(
+        SimulationProfile profile, double? resetTimerSeconds, Random random, TimeSpan? sinceProfileStart = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(random);
@@ -23,6 +36,12 @@ public static class TickScheduleCalculator
         if (resetTimerSeconds is > 0)
         {
             return TimeSpan.FromSeconds(resetTimerSeconds.Value);
+        }
+
+        // FR-SIM-10: ramp thay interval + jitter; không rút số ngẫu nhiên. Rate đã được Validate đảm bảo > 0
+        if (sinceProfileStart is { } elapsed && RampRate(profile, elapsed) is { } rate)
+        {
+            return TimeSpan.FromSeconds(1d / rate);
         }
 
         var spread = profile.JitterMax - profile.JitterMin;
@@ -50,4 +69,5 @@ public static class TickScheduleCalculator
         var earliest = lastSuccessfulEmit.Value + minGap;
         return earliest > due ? new MinGapResult(earliest, true) : new MinGapResult(due, false);
     }
+    
 }
