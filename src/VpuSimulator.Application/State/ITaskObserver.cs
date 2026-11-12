@@ -1,4 +1,4 @@
-﻿using VpuSimulator.Application.Commands;
+using VpuSimulator.Application.Commands;
 
 namespace VpuSimulator.Application.State;
 

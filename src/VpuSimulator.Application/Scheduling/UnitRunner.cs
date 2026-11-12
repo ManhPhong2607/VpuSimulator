@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Domain;
 
@@ -31,6 +31,7 @@ public sealed class UnitRunner : IAsyncDisposable
 
     // Mọi trường dưới đây chỉ được đọc/ghi trong lock (_gate).
     private SimulationProfile _profile;
+    private DateTimeOffset _profileStartedAt;
     private double? _resetTimerSeconds;
     private bool _started;
     private bool _stopped;
@@ -46,6 +47,7 @@ public sealed class UnitRunner : IAsyncDisposable
     private DateTimeOffset? _nextDue;
     private DateTimeOffset? _lastEmitAt; // lần phát THÀNH CÔNG (Emitted) cuối, dùng cho min_gap
     private DateTimeOffset? _lastCompletion; // lúc lần phát gần nhất kết thúc, dù kết quả gì
+    private RuleOutcome? _lastOutcome; // kết quả của lần phát gần nhất (mọi loại kết quả), phục vụ last_result
     private TaskCompletionSource _wake = NewWake();
     private Task? _loop;
     private long _emitted;
@@ -77,6 +79,7 @@ public sealed class UnitRunner : IAsyncDisposable
         _key = key;
         _seed = seed;
         _profile = profile;
+        _profileStartedAt = time.GetUtcNow();
         _armDelay = armDelay;
         _time = time;
         _emit = emit;
@@ -105,6 +108,7 @@ public sealed class UnitRunner : IAsyncDisposable
             _started = true;
             _auto = auto;
             _nextDue = auto ? _time.GetUtcNow() + _armDelay : null;
+            _profileStartedAt = _time.GetUtcNow();
         }
 
         _loop = RunAsync();
@@ -179,6 +183,11 @@ public sealed class UnitRunner : IAsyncDisposable
 
         lock (_gate)
         {
+            if (profile != _profile)
+            {
+                _profileStartedAt = _time.GetUtcNow(); // đổi sang profile khác thì ramp bắt đầu lại
+            }
+
             _profile = profile;
             _recomputeRequested = true;
             WakeLocked();
@@ -222,9 +231,16 @@ public sealed class UnitRunner : IAsyncDisposable
     {
         lock (_gate)
         {
+            double? target = null;
+            if (_auto && _resetTimerSeconds is not > 0)
+            {
+                target = TickScheduleCalculator.RampRate(_profile, _time.GetUtcNow() - _profileStartedAt);
+            }
+
             return new UnitSnapshot(
                 _key, _auto, _isEmitting, _epoch, _auto ? _nextDue : null, _lastEmitAt,
-                _emitted, _noMessage, _precondition, _errors, _ticksDropped, _ticksDeferred, _triggersRejected);
+                _emitted, _noMessage, _precondition, _errors, _ticksDropped, _ticksDeferred, _triggersRejected,
+                _profile.Name, target, _lastOutcome);
         }
     }
 
@@ -315,7 +331,8 @@ public sealed class UnitRunner : IAsyncDisposable
 
                     var runToken = _runToken;
                     context = new UnitEmitContext(_key, _epoch, runToken, _payloadRandom, manual, now,
-                        commit => TryCommit(runToken, commit));
+                        commit => TryCommit(runToken, commit),
+                        CoalesceTimestamps: _profile.CoalesceTimestamps);
                 }
 
                 RuleOutcome outcome;
@@ -410,7 +427,9 @@ public sealed class UnitRunner : IAsyncDisposable
                 _errors++;
                 break;
         }
-
+        
+        _lastOutcome = outcome;
+        
         // Lần phát thuộc phiên cũ (đã Off→On trong lúc phát): lịch đã được đặt lại khi đổi phiên, kết quả này không được ghi đè.
         if (context.RunToken != _runToken)
         {
@@ -445,7 +464,8 @@ public sealed class UnitRunner : IAsyncDisposable
 
     private DateTimeOffset ComputeNextDueLocked(DateTimeOffset completion)
     {
-        var delay = TickScheduleCalculator.NextDelay(_profile, _resetTimerSeconds, _scheduleRandom);
+        var delay = TickScheduleCalculator.NextDelay(
+            _profile, _resetTimerSeconds, _scheduleRandom, completion - _profileStartedAt);
         var result = TickScheduleCalculator.ApplyMinGap(completion + delay, _lastEmitAt, _profile.MinGap);
         if (result.Deferred)
         {

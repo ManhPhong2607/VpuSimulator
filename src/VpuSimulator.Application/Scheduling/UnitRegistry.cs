@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Application.Commands;
@@ -21,9 +21,9 @@ public delegate UnitEmitDelegate UnitEmitterFactory(UnitKey key, IUnitConfigSour
 public enum UnitTriggerOutcome
 {
     Accepted,
-    Busy,        // unit đang phát 
-    NotFound,    // không có unit này (hoặc vừa bị gỡ)
-    Ambiguous,   // nhiều rule cùng roi mà không nói rõ rule nào
+    Busy, // unit đang phát 
+    NotFound, // không có unit này (hoặc vừa bị gỡ)
+    Ambiguous, // nhiều rule cùng roi mà không nói rõ rule nào
 }
 
 /// Matches Accepted/Busy: đúng một khoá. Ambiguous: các khoá trùng. NotFound: rỗng
@@ -34,13 +34,36 @@ public interface IUnitRegistry : ITaskObserver
     long Seed { get; }
 
     IReadOnlyList<UnitSnapshot> Snapshots(string? appId = null);
-    
+
     //FR-SIM-4: phát một lần ngay, bất kể auto. ruleName null: chỉ hợp lệ khi (appId, task, roi) khớp đúng một unit
     UnitTriggerResult Trigger(string appId, string taskId, int roiId, string? ruleName = null);
 
+    //FR-SIM-3: bật/tắt phát tự động của một unit. Lựa chọn thủ công được nhớ, VMS update-task không ghi đè.
+    UnitAutoResult SetAuto(string appId, string taskId, int roiId, bool auto, string? ruleName = null);
+
+    //FR-SIM-9 / W-10: đổi profile của các unit ĐANG TỒN TẠI theo phạm vi. Trả số unit đã đổi.
+    //appId null = toàn bộ; taskId chỉ hợp lệ khi có appId. Unit tạo sau vẫn dùng profile mặc định.
+    int ApplyProfile(SimulationProfile profile, string? appId = null, string? taskId = null);
+
     //Gỡ identity: quên bộ đếm epoch của identity đó. Gọi SAU khi kho task đã Clear
     void ForgetIdentity(string appId);
+
+    //FR-ID-9: profile riêng của identity, dùng cho unit TẠO SAU. Không đổi unit đang có (W-10)
+    void SetIdentityProfile(string appId, SimulationProfile profile);
+
+    //Tên profile mà unit mới của identity sẽ dùng
+    string IdentityProfileName(string appId);
 }
+
+public enum UnitAutoOutcome
+{
+    Applied,
+    NotFound,
+    Ambiguous, // nhiều rule cùng roi mà không nói rõ rule nào
+}
+
+/// Auto: giá trị HIỆU LỰC sau khi áp dụng. Có thể là false dù yêu cầu true, khi task/rule đang bị VMS tắt.
+public sealed record UnitAutoResult(UnitAutoOutcome Outcome, IReadOnlyList<UnitKey> Matches, bool Auto);
 
 /// <summary>
 /// Giữ mọi <see cref="UnitRunner"/> và đồng bộ chúng với kho task: mỗi rule của mỗi task đang chạy có đúng một unit.
@@ -74,7 +97,9 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
 
     private readonly object _gate = new();
     private readonly Dictionary<UnitKey, Entry> _units = new();
-    private readonly Dictionary<UnitKey, int> _nextEpoch = new();   // epoch cho unit tạo lại với cùng khoá
+    private readonly Dictionary<UnitKey, int> _nextEpoch = new(); // epoch cho unit tạo lại với cùng khoá
+    private readonly Dictionary<UnitKey, bool> _manualAuto = new();
+    private readonly Dictionary<string, SimulationProfile> _identityProfiles = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Task, byte> _disposing = new();
     private bool _disposed;
 
@@ -107,7 +132,8 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         _fixedPeriodSeconds = fixedPeriodSeconds;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<UnitRegistry>();
-        _logger.LogInformation("Simulation seed {Seed}, profile {Profile}, arm delay {ArmDelay}", seed, profile.Name, armDelay);
+        _logger.LogInformation("Simulation seed {Seed}, profile {Profile}, arm delay {ArmDelay}", seed, profile.Name,
+            armDelay);
     }
 
     public long Seed { get; }
@@ -169,18 +195,41 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
 
             foreach (var key in KeysOf(appId))
             {
-                stale.Add(Detach(key));   // thường rỗng: kho đã Clear trước đó
+                stale.Add(Detach(key)); // thường rỗng: kho đã Clear trước đó
             }
 
             foreach (var key in _nextEpoch.Keys.Where(k => k.AppId == appId).ToList())
             {
                 _nextEpoch.Remove(key);
             }
+
+            _identityProfiles.Remove(appId);
         }
 
         foreach (var runner in stale)
         {
             DisposeInBackground(runner);
+        }
+    }
+
+    public void SetIdentityProfile(string appId, SimulationProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        lock (_gate)
+        {
+            _identityProfiles[appId] = profile;
+        }
+    }
+
+    public string IdentityProfileName(string appId)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        lock (_gate)
+        {
+            return _identityProfiles.GetValueOrDefault(appId, _profile).Name;
         }
     }
 
@@ -198,7 +247,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
                 .ToList();
         }
     }
-    
+
     public UnitTriggerResult Trigger(string appId, string taskId, int roiId, string? ruleName = null)
     {
         ArgumentNullException.ThrowIfNull(appId);
@@ -235,8 +284,80 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         {
             TriggerResult.Accepted => new UnitTriggerResult(UnitTriggerOutcome.Accepted, [key]),
             TriggerResult.RejectedBusy => new UnitTriggerResult(UnitTriggerOutcome.Busy, [key]),
-            _ => new UnitTriggerResult(UnitTriggerOutcome.NotFound, []),   // unit vừa bị gỡ giữa hai bước
+            _ => new UnitTriggerResult(UnitTriggerOutcome.NotFound, []), // unit vừa bị gỡ giữa hai bước
         };
+    }
+
+    public UnitAutoResult SetAuto(string appId, string taskId, int roiId, bool auto,
+        string? ruleName = null)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+        ArgumentNullException.ThrowIfNull(taskId);
+
+        // Trong khoá của registry (giống Reconcile) để không chạy đua với update-task.
+        lock (_gate)
+        {
+            var matches = _units
+                .Where(kv => kv.Key.AppId == appId
+                             && kv.Key.TaskId == taskId
+                             && kv.Key.RoiId == roiId
+                             && (ruleName is null || kv.Key.RuleName == ruleName))
+                .OrderBy(kv => kv.Key.RuleName, StringComparer.Ordinal)
+                .ToList();
+
+            if (matches.Count == 0)
+            {
+                return new UnitAutoResult(UnitAutoOutcome.NotFound, [], false);
+            }
+
+            if (matches.Count > 1)
+            {
+                return new UnitAutoResult(UnitAutoOutcome.Ambiguous,
+                    matches.Select(m => m.Key).ToList(), false);
+            }
+
+            var key = matches[0].Key;
+            var entry = matches[0].Value;
+            _manualAuto[key] = auto;
+
+            var view = entry.Config.Current;
+            var effective = view.Task.Enable != false && view.Rule.Enable != false && auto;
+            entry.Runner.SetAuto(effective); // không đổi thì không làm gì (và không tăng epoch)
+            return new UnitAutoResult(UnitAutoOutcome.Applied, [key], effective);
+        }
+    }
+
+    public int ApplyProfile(SimulationProfile profile, string? appId = null, string? taskId = null)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (taskId is not null && appId is null)
+        {
+            throw new ArgumentException("task cần đi kèm app_id", nameof(taskId));
+        }
+
+        var errors = profile.Validate();
+        if (errors.Count > 0)
+        {
+            throw new ArgumentException(string.Join("; ", errors), nameof(profile));
+        }
+
+        List<UnitRunner> targets;
+        lock (_gate)
+        {
+            targets = _units
+                .Where(kv => (appId is null || kv.Key.AppId == appId)
+                             && (taskId is null || kv.Key.TaskId == taskId))
+                .Select(kv => kv.Value.Runner)
+                .ToList();
+        }
+
+        // Gọi ngoài khoá của registry: runner có khoá riêng.
+        foreach (var runner in targets)
+        {
+            runner.SetProfile(profile);
+        }
+
+        return targets.Count;
     }
 
     /// <summary>Chờ các unit đã gỡ dừng hẳn. Dùng trong test và khi tắt.</summary>
@@ -269,7 +390,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
 
     private void Reconcile(string appId, ParsedTask task)
     {
-        var taskEnabled = task.Enable != false;   // FR-CMD-14: vắng mặt hoặc true là bật
+        var taskEnabled = task.Enable != false; // FR-CMD-14: vắng mặt hoặc true là bật
         var stale = new List<UnitRunner>();
 
         lock (_gate)
@@ -286,22 +407,22 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
                 wanted.Add(key);
 
                 var view = new UnitConfigView(task, rule);
-                var effective = taskEnabled && rule.Enable != false;
+                var effective = taskEnabled && rule.Enable != false && _manualAuto.GetValueOrDefault(key, true);
                 var resetTimer = Normalize(_fixedPeriodSeconds?.Invoke(view));
 
                 if (_units.TryGetValue(key, out var entry))
                 {
                     entry.Config.Replace(view);
                     entry.Runner.SetResetTimer(resetTimer);
-                    entry.Runner.SetAuto(effective);   // không đổi thì không làm gì (và không tăng epoch)
+                    entry.Runner.SetAuto(effective); // không đổi thì không làm gì (và không tăng epoch)
                 }
                 else
                 {
                     var epoch = _nextEpoch.GetValueOrDefault(key);
                     var config = new UnitConfig(view);
                     var runner = new UnitRunner(
-                        key, Seed, _profile, _armDelay, _time, _emitterFactory(key, config),
-                        resetTimer, epoch, _loggerFactory.CreateLogger<UnitRunner>());
+                        key, Seed, _identityProfiles.GetValueOrDefault(key.AppId, _profile), _armDelay, _time,
+                        _emitterFactory(key, config), resetTimer, epoch, _loggerFactory.CreateLogger<UnitRunner>());
                     _units[key] = new Entry(runner, config);
                     runner.Start(effective);
                     _logger.LogInformation("Unit {Unit} được tạo (epoch {Epoch}, auto {Auto})", key, epoch, effective);
@@ -325,6 +446,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
     {
         var entry = _units[key];
         _units.Remove(key);
+        _manualAuto.Remove(key);
         _nextEpoch[key] = entry.Runner.Snapshot().Epoch + 1;
         _logger.LogInformation("Unit {Unit} bị gỡ", key);
         return entry.Runner;

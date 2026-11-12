@@ -13,7 +13,7 @@ using VpuSimulator.Domain.RuleContracts;
 namespace VpuSimulator.Application.Scheduling;
 
 /// <summary>
-/// Hàm phát sự kiện thật sự của Emission Unit (thay thế cho PlaceholderEmitter).
+/// Hàm phát sự kiện thật sự của Emission Unit
 /// Thực thi đúng 11 bước theo đặc tả Contract v4 §4.5:
 /// 1. Đọc config.Current (ParsedTask, ParsedRule)
 /// 2. Ánh xạ sang UnitInfo và RuleContext
@@ -141,7 +141,8 @@ public static class UnitEmitter
                 var build = def.Builder.Build(unit, rule, tick, decision, active);
 
                 // Dựng wire envelope
-                var envelope = EnvelopeMapper.Map(unit.AppId, unit.TaskId, context.Now, build.Event);
+                var stamp = context.CoalesceTimestamps ? TimestampCoalescer.FloorToSecond(context.Now) : context.Now;
+                var envelope = EnvelopeMapper.Map(unit.AppId, unit.TaskId, stamp, build.Event);
 
                 var routingKey = RoutingKeys.Data(unit.TaskId);
                 await broker.PublishAsync(routingKey, envelope, cancellationToken).ConfigureAwait(false);
@@ -163,6 +164,11 @@ public static class UnitEmitter
                                 break;
                             case WriteCorrelation write:
                                 correlationStore.Write(unit.AppId, write.Key, write.Value);
+                                break;
+                            default:
+                                logger?.LogWarning(
+                                    "Unit {Unit}: bỏ qua loại state proposal chưa được hỗ trợ {Proposal}",
+                                    key, proposal.GetType().Name);
                                 break;
                         }
                     }

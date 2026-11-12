@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using VpuSimulator.Api.Hosting;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Api.Endpoints;

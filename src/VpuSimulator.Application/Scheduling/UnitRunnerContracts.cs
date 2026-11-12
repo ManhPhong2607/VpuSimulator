@@ -10,7 +10,8 @@ public sealed record UnitEmitContext(
     Random PayloadRandom,
     bool IsManual,
     DateTimeOffset Now,
-    Func<Action, bool>? TryCommit = null);
+    Func<Action, bool>? TryCommit = null,
+    bool CoalesceTimestamps = false);
 
 /// <summary>
 /// Hàm "phát một lần". Phải tôn trọng cancellationToken: gỡ unit khi đang phát thì token bị huỷ (FR-SIM-15).
@@ -39,4 +40,7 @@ public sealed record UnitSnapshot(
     long Errors,
     long TicksDropped,
     long TicksDeferredByMinGap,
-    long TriggersRejected);
+    long TriggersRejected,
+    string Profile,
+    double? TargetEps,
+    RuleOutcome? LastOutcome = null);

@@ -14,4 +14,6 @@ public sealed class IdentityOptions
     
     // Tên target broker mà identity này kết nối BrokerTargetOptions.DefaultName
     public string? Broker { get; set; }
+    
+    public string? Profile { get; set; }
 }
