@@ -2,12 +2,23 @@
 using VpuSimulator.Api.Hosting;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Api.Endpoints;
+using VpuSimulator.Application.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddVpuMessaging(builder.Configuration);
 
-builder.WebHost.UseUrls(builder.Configuration["Api:Listen"] ?? "http://127.0.0.1:18080");
+var listen = builder.Configuration["Api:Listen"] ?? "http://127.0.0.1:18080";
+var tokenValidator = new BearerTokenValidator(builder.Configuration["Api:Token"]);
+
+// NFR-SEC: không mở listener ra ngoài loopback khi chưa có token
+if (!tokenValidator.Enabled && !ListenAddress.IsLoopbackOnly(listen))
+    throw new InvalidOperationException(
+        $"Api:Listen='{listen}' không phải loopback nhưng chưa cấu hình Api:Token. " +
+        "Đặt biến môi trường Api__Token hoặc chỉ lắng nghe 127.0.0.1.");
+
+builder.Services.AddSingleton(tokenValidator);
+builder.WebHost.UseUrls(listen);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
