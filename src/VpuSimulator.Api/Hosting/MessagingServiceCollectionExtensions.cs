@@ -28,17 +28,31 @@ public static class MessagingServiceCollectionExtensions
         var schedulerOptions = configuration.GetStrict<SchedulerOptions>("Scheduler");
         var simulationOptions = configuration.GetStrict<SimulationOptions>("Simulation");
         var profileOptions = configuration.GetStrict<Dictionary<string, ProfileOptions>>("Profiles");
-        if (!SimulationSettings.TryResolve(schedulerOptions, simulationOptions, profileOptions, out var settings, out var settingsErrors))
+        if (!SimulationSettings.TryResolve(schedulerOptions, simulationOptions, profileOptions, out var settings,
+                out var settingsErrors))
         {
             throw new InvalidOperationException(
-                "Cấu hình scheduler không hợp lệ:" + Environment.NewLine + string.Join(Environment.NewLine, settingsErrors));
+                "Cấu hình scheduler không hợp lệ:" + Environment.NewLine +
+                string.Join(Environment.NewLine, settingsErrors));
         }
 
         services.AddSingleton(settings);
-
+        
+        var badProfiles = options.Identities
+            .Where(i => !string.IsNullOrWhiteSpace(i.Profile) && !settings.Profiles.ContainsKey(i.Profile!))
+            .Select(i => $"Messaging:Identities[{i.AppId}]:Profile = '{i.Profile}': profile không tồn tại. " +
+                         $"Hiện có: {string.Join(", ", settings.Profiles.Keys)}.")
+            .ToList();
+        if (badProfiles.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Cấu hình identity không hợp lệ:" + Environment.NewLine + string.Join(Environment.NewLine, badProfiles));
+        }
+        
         services.AddSingleton(options);
 
         services.AddSingleton(TimeProvider.System);
+        
         services.AddSingleton(new AppClock(TimeProvider.System.GetUtcNow())); // truyền instance: tạo ngay lúc khởi động
 
         services.AddSingleton<IMessageBrokerFactory>(sp => new RabbitMqBrokerFactory(
@@ -53,7 +67,8 @@ public static class MessagingServiceCollectionExtensions
         services.AddSingleton<IFollowUpPolicy, DefaultFollowUpPolicy>();
 
         // Registry tra cứu định nghĩa rule (kết hợp Handler + Builder + EmittedGroup)
-        services.AddSingleton<IRuleHandlerRegistry>(sp => new RuleHandlerRegistry(RuleCatalog.Create(sp.GetRequiredService<IFollowUpPolicy>())));
+        services.AddSingleton<IRuleHandlerRegistry>(sp =>
+            new RuleHandlerRegistry(RuleCatalog.Create(sp.GetRequiredService<IFollowUpPolicy>())));
 
         // Xử lý lệnh VMS: kho task trong bộ nhớ, bộ đếm, 5 handler, và dispatcher làm IInboundMessageHandler.
         services.AddSingleton<CommandStats>();
@@ -82,7 +97,7 @@ public static class MessagingServiceCollectionExtensions
             isSupportedRule: (name, aiFlowCode) =>
                 sp.GetRequiredService<IRuleHandlerRegistry>().Resolve(name, ToAiFlowCode(aiFlowCode)) is not null,
             logger: sp.GetService<ILogger<AddTaskCommandHandler>>()));
-        
+
         services.AddSingleton<ICommandHandler, EndTaskCommandHandler>();
 
         services.AddSingleton<ICommandHandler, StopAllCommandHandler>();
@@ -102,11 +117,17 @@ public static class MessagingServiceCollectionExtensions
                                           Math.Min(3000, interval.TotalMilliseconds * 0.1)),
             inboundHandler: sp.GetService<IInboundMessageHandler>(),
             taskStore: sp.GetService<ITaskStore>(),
-            units: sp.GetService<IUnitRegistry>()));
+            units: sp.GetService<IUnitRegistry>(),
+            profileResolver: name => sp.GetRequiredService<SimulationSettings>().Profiles.GetValueOrDefault(name),
+            correlationStore: sp.GetService<ICorrelationStore>()));
 
         services.AddHostedService<IdentityHostedService>();
+        services.AddSingleton<EpsMeter>();
+        services.AddHostedService<EpsSamplerService>();
+
         return services;
     }
+
     // Giống cách UnitEmitter ánh xạ: mã ngoài enum coi như vắng mặt, rơi về định nghĩa không ràng buộc
     private static AiFlowCode? ToAiFlowCode(int? code) =>
         code is { } c && Enum.IsDefined(typeof(AiFlowCode), c) ? (AiFlowCode)c : null;

@@ -41,4 +41,6 @@ public sealed record UnitSnapshot(
     long TicksDropped,
     long TicksDeferredByMinGap,
     long TriggersRejected,
-    string Profile);
+    string Profile,
+    double? TargetEps,
+    RuleOutcome? LastOutcome = null);

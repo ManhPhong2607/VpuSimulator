@@ -7,10 +7,11 @@ using VpuSimulator.Application.Messaging;
 using VpuSimulator.Application.Options;
 using VpuSimulator.Application.State;
 using VpuSimulator.Application.Scheduling;
+using VpuSimulator.Domain.FollowUp;
 
 namespace VpuSimulator.Application.Identity;
 
-/// <summary>Kết quả thêm identity — Control API ánh xạ: Duplicate → 409, Invalid*/UnknownBroker → 400</summary>
+/// <summary>Kết quả thêm identity — Control API ánh xạ: Duplicate → 409, Invalid/UnknownBroker/Unknown Profile → 400</summary>
 public enum IdentityOpResult
 {
     Added,
@@ -19,6 +20,7 @@ public enum IdentityOpResult
     InvalidHeartbeat,
     UnknownBroker,
     Failed,
+    UnknownProfile,
 }
 
 public sealed record IdentityStatus(
@@ -49,6 +51,8 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
     private readonly IInboundMessageHandler? _inboundHandler;
     private readonly ITaskStore? _taskStore;
     private readonly IUnitRegistry? _units;
+    private readonly Func<string, SimulationProfile?>? _profileResolver;
+    private readonly ICorrelationStore? _correlationStore;
 
     public IdentityLifecycleService(
         IMessageBrokerFactory factory,
@@ -57,7 +61,9 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         Func<TimeSpan, TimeSpan>? heartbeatJitter = null,
         IInboundMessageHandler? inboundHandler = null,
         ITaskStore? taskStore = null,
-        IUnitRegistry? units = null)
+        IUnitRegistry? units = null,
+        Func<string, SimulationProfile?>? profileResolver = null,
+        ICorrelationStore? correlationStore = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(time);
@@ -69,6 +75,8 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         _inboundHandler = inboundHandler;
         _taskStore = taskStore;
         _units = units;
+        _profileResolver = profileResolver;
+        _correlationStore = correlationStore;
     }
 
     //Danh sách app_id đang chạy
@@ -94,7 +102,17 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         {
             return IdentityOpResult.UnknownBroker;
         }
-
+        
+        SimulationProfile? profile = null;
+        if (!string.IsNullOrWhiteSpace(options.Profile))
+        {
+            profile = _profileResolver?.Invoke(options.Profile);
+            if (profile is null)
+            {
+                return IdentityOpResult.UnknownProfile;
+            }
+        }
+        
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -114,7 +132,11 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                     brokerName);
                 return IdentityOpResult.Failed;
             }
-
+            
+            if (profile is not null)
+            {
+                _units?.SetIdentityProfile(appId, profile);
+            }
             var registered = false;
             CancellationTokenSource? cts = null;
             try
@@ -164,7 +186,9 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                     cts?.Cancel(); // dừng vòng heartbeat nếu đã lỡ chạy
                     cts?.Dispose();
                     await DisposeSessionAsync(session, appId).ConfigureAwait(false);
+                    _units?.ForgetIdentity(appId);
                 }
+                
             }
         }
         finally
@@ -200,6 +224,17 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         }
         finally
         {
+            // Xoá correlation SAU khi dừng: heartbeat đã ngừng, session đã đóng, runner đã bị gỡ ở bước trên,
+            // nên không còn ai ghi thêm entry của identity này (FR-ID-6).
+            try
+            {
+                _correlationStore?.Clear(appId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Identity {AppId}: lỗi khi xoá correlation", appId);
+            }
+
             _identities.TryRemove(new KeyValuePair<string, RunningIdentity>(appId, running));
         }
 
