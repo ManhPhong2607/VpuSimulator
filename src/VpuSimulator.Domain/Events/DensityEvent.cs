@@ -1,6 +1,13 @@
+using System.Text.Json.Serialization;
+
 namespace VpuSimulator.Domain.Events;
 
-public readonly record struct DensityDataPoint(double AvgSpeed, int ClassId, string Label, int Volume);
+public readonly record struct DensityDataPoint(
+    [property: JsonPropertyName("avg_speed")] double AvgSpeed,
+    [property: JsonPropertyName("class_id")] int ClassId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("volume")] int Volume
+);
 
 public sealed class DensityEvent : RuleOutputEvent
 {
