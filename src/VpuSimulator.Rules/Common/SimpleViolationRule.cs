@@ -21,7 +21,7 @@ public static class SimpleViolationRule
     {
         var rng = tick.Rng;
         var fixedValues = tick.FixedValues;
-        var refId = fixedValues.Enabled
+        var refId = fixedValues.Enabled 
             ? fixedValues.RefId
             : null;
         return new ViolationEvent
