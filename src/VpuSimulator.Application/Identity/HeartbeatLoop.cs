@@ -17,13 +17,20 @@ public sealed class HeartbeatLoop
 {
     private readonly IBrokerSession _session;
     private readonly string _appId;
-    private readonly TimeSpan _interval;
+    private long _intervalTicks;
+    private volatile bool _enabled = true;
+    public bool Enabled
+    {
+        get => _enabled;
+        set => _enabled = value;
+    }
+    private PeriodicTimer? _timer;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
     private long _publishFailures;
     private readonly TimeSpan _initialDelay;
     private long _lastSuccessTicks;
-    
+
     public HeartbeatLoop(
         IBrokerSession session,
         string appId,
@@ -40,17 +47,54 @@ public sealed class HeartbeatLoop
 
         _session = session;
         _appId = appId;
-        _interval = interval;
+        _intervalTicks = interval.Ticks;
         _time = time;
         _logger = logger ?? NullLogger.Instance;
     }
 
+    /// <summary>Chu kỳ hiện tại. Đổi được lúc đang chạy qua <see cref="SetInterval"/>.</summary>
+    public TimeSpan Interval => TimeSpan.FromTicks(Interlocked.Read(ref _intervalTicks));
+
+    /// <summary>
+    /// Đổi chu kỳ khi vòng đang chạy: tick kế tiếp tính từ lúc đổi. Không dựng lại vòng, không đụng session.
+    /// </summary>
+    public void SetInterval(TimeSpan interval)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(interval, TimeSpan.Zero);
+        if (interval == Interval)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _intervalTicks, interval.Ticks);
+        var timer = Volatile.Read(ref _timer);
+        if (timer is null)
+        {
+            return; // chưa tạo timer: RunAsync sẽ đọc chu kỳ mới khi tạo
+        }
+
+        try
+        {
+            timer.Period = interval;
+        }
+        catch (ObjectDisposedException)
+        {
+            // vòng vừa dừng (gỡ identity): không còn gì để đổi
+        }
+    }
+
     // Số lần publish heartbeat thất bại (khi đang kết nối). Bản tin lỗi bị bỏ, không gửi bù
     public long PublishFailureCount => Interlocked.Read(ref _publishFailures);
+
     public DateTimeOffset? LastHeartbeatAt
     {
-        get { var t = Interlocked.Read(ref _lastSuccessTicks); return t == 0 ? null : new DateTimeOffset(t, TimeSpan.Zero); }
+        get
+        {
+            var t = Interlocked.Read(ref _lastSuccessTicks);
+            return t == 0 ? null : new DateTimeOffset(t, TimeSpan.Zero);
+        }
     }
+
     /// <summary>
     /// Chạy tới khi cancellationToken bị huỷ. Timer được tạo ĐỒNG BỘ ở lệnh đầu tiên của hàm
     /// (trước await đầu tiên) — test dựa vào điều này để biết khi RunAsync trả Task về thì timer đã sẵn sàng
@@ -59,17 +103,26 @@ public sealed class HeartbeatLoop
     {
         if (_initialDelay > TimeSpan.Zero)
         {
-            try { await Task.Delay(_initialDelay, _time, cancellationToken).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+            try
+            {
+                await Task.Delay(_initialDelay, _time, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
         }
-        using var timer = new PeriodicTimer(_interval, _time);
+
+        using var timer = new PeriodicTimer(Interval, _time);
+        Volatile.Write(ref _timer, timer);
+        timer.Period = Interval; // nếu SetInterval chạy xen vào giữa lúc tạo và lúc gán field
 
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken)) 
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
                 // chỉ heartbeat khi đang kết nối. Mất kết nối thì bỏ qua tick này (không đệm, không gửi bù)
-                if (!_session.IsConnected)
+                if (!_session.IsConnected || !_enabled)
                 {
                     continue;
                 }
@@ -77,9 +130,11 @@ public sealed class HeartbeatLoop
                 await PublishHeartbeatAsync(cancellationToken);
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        
+        finally
         {
-            // Dừng có chủ đích (gỡ identity / tắt tiến trình) — không phải lỗi
+            Volatile.Write(ref _timer, null);
         }
     }
 
@@ -87,7 +142,7 @@ public sealed class HeartbeatLoop
     {
         // Mỗi lần publish có hạn chót = 1 chu kỳ: publish treo (chờ khoá, mạng nghẽn) không chặn được các tick sau.
         using var publishCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        publishCts.CancelAfter(_interval);
+        publishCts.CancelAfter(Interval);
 
         try
         {
@@ -103,10 +158,9 @@ public sealed class HeartbeatLoop
             _logger.LogWarning(ex, "Heartbeat publish failed for identity {AppId}", _appId);
         }
     }
-    
+
     public void RecordHeartbeatSuccess()
     {
         Interlocked.Exchange(ref _lastSuccessTicks, _time.GetUtcNow().UtcTicks);
     }
-
 }

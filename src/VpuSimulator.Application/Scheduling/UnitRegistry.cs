@@ -45,6 +45,16 @@ public interface IUnitRegistry : ITaskObserver
     //appId null = toàn bộ; taskId chỉ hợp lệ khi có appId. Unit tạo sau vẫn dùng profile mặc định.
     int ApplyProfile(SimulationProfile profile, string? appId = null, string? taskId = null);
 
+    // Công tắc tắt thủ công cấp task (VPS Off). Độc lập với `enable` do VMS gửi: update-task không ghi đè.
+    // Mất khi task bị gỡ (end-task, stop-all, DELETE) hoặc identity bị gỡ.
+    void SetTaskManuallyOff(string appId, string taskId, bool off);
+
+    bool IsTaskManuallyOff(string appId, string taskId);
+    
+    void SetIdentityOff(string appId, bool off);
+
+    bool IsIdentityOff(string appId);
+
     //Gỡ identity: quên bộ đếm epoch của identity đó. Gọi SAU khi kho task đã Clear
     void ForgetIdentity(string appId);
 
@@ -99,6 +109,8 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
     private readonly Dictionary<UnitKey, Entry> _units = new();
     private readonly Dictionary<UnitKey, int> _nextEpoch = new(); // epoch cho unit tạo lại với cùng khoá
     private readonly Dictionary<UnitKey, bool> _manualAuto = new();
+    private readonly HashSet<(string AppId, string TaskId)> _manualTaskOff = new();
+    private readonly HashSet<string> _identityOff = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SimulationProfile> _identityProfiles = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Task, byte> _disposing = new();
     private bool _disposed;
@@ -168,6 +180,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
 
             foreach (var task in removed)
             {
+                _manualTaskOff.Remove((appId, task.TaskId));
                 foreach (var key in KeysOf(appId, task.TaskId))
                 {
                     stale.Add(Detach(key));
@@ -204,6 +217,8 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
             }
 
             _identityProfiles.Remove(appId);
+            _manualTaskOff.RemoveWhere(p => p.AppId == appId);
+            _identityOff.Remove(appId);
         }
 
         foreach (var runner in stale)
@@ -321,9 +336,90 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
             _manualAuto[key] = auto;
 
             var view = entry.Config.Current;
-            var effective = view.Task.Enable != false && view.Rule.Enable != false && auto;
+            var effective = EffectiveAuto(view.Task, view.Rule, key); // _manualAuto[key] đã được ghi ở trên
             entry.Runner.SetAuto(effective); // không đổi thì không làm gì (và không tăng epoch)
             return new UnitAutoResult(UnitAutoOutcome.Applied, [key], effective);
+        }
+    }
+
+    public void SetTaskManuallyOff(string appId, string taskId, bool off)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+        ArgumentNullException.ThrowIfNull(taskId);
+
+        // Trong khoá của registry (giống Reconcile) để không chạy đua với update-task.
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (off)
+            {
+                _manualTaskOff.Add((appId, taskId));
+            }
+            else
+            {
+                _manualTaskOff.Remove((appId, taskId));
+            }
+
+            foreach (var key in KeysOf(appId, taskId))
+            {
+                var entry = _units[key];
+                var view = entry.Config.Current;
+                entry.Runner.SetAuto(EffectiveAuto(view.Task, view.Rule, key)); // không đổi thì không làm gì
+            }
+        }
+    }
+
+    public bool IsTaskManuallyOff(string appId, string taskId)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+        ArgumentNullException.ThrowIfNull(taskId);
+
+        lock (_gate)
+        {
+            return _manualTaskOff.Contains((appId, taskId));
+        }
+    }
+    
+    public void SetIdentityOff(string appId, bool off)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (off)
+            {
+                _identityOff.Add(appId);
+            }
+            else
+            {
+                _identityOff.Remove(appId);
+            }
+
+            foreach (var key in KeysOf(appId))
+            {
+                var entry = _units[key];
+                var view = entry.Config.Current;
+                entry.Runner.SetAuto(EffectiveAuto(view.Task, view.Rule, key)); // không đổi thì không làm gì
+            }
+        }
+    }
+
+    public bool IsIdentityOff(string appId)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        lock (_gate)
+        {
+            return _identityOff.Contains(appId);
         }
     }
 
@@ -387,10 +483,16 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
     }
 
     // ---------------------------------------------------------------- nội bộ
-
+    // Gọi trong khoá. FR-CMD-14: enable vắng mặt hoặc true là bật. Cả bốn điều kiện phải thoả.
+    private bool EffectiveAuto(ParsedTask task, ParsedRule rule, UnitKey key) =>
+        !_identityOff.Contains(key.AppId)
+        && task.Enable != false
+        && !_manualTaskOff.Contains((key.AppId, key.TaskId))
+        && rule.Enable != false
+        && _manualAuto.GetValueOrDefault(key, true);
+    
     private void Reconcile(string appId, ParsedTask task)
     {
-        var taskEnabled = task.Enable != false; // FR-CMD-14: vắng mặt hoặc true là bật
         var stale = new List<UnitRunner>();
 
         lock (_gate)
@@ -407,7 +509,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
                 wanted.Add(key);
 
                 var view = new UnitConfigView(task, rule);
-                var effective = taskEnabled && rule.Enable != false && _manualAuto.GetValueOrDefault(key, true);
+                var effective = EffectiveAuto(task, rule, key);
                 var resetTimer = Normalize(_fixedPeriodSeconds?.Invoke(view));
 
                 if (_units.TryGetValue(key, out var entry))
