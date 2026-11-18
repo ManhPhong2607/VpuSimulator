@@ -11,7 +11,31 @@ public sealed record IdentityDto(
     [property: JsonPropertyName("tasks")] int Tasks,
     [property: JsonPropertyName("units")] int Units,
     [property: JsonPropertyName("profile")] string Profile,
-    [property: JsonPropertyName("eps")] double eps);
+    [property: JsonPropertyName("eps")] double eps,
+    [property: JsonPropertyName("heartbeat")] HeartbeatDto Heartbeat,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("status")] string Status);
+
+// Heartbeat gửi dạng chuỗi ("30s"); phản hồi trả cả chuỗi lẫn số giây (contract 10.1)
+public sealed record HeartbeatDto(
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("interval")] string Interval,
+    [property: JsonPropertyName("interval_seconds")] double IntervalSeconds,
+    [property: JsonPropertyName("last_at")] DateTimeOffset? LastAt)
+{
+    public static HeartbeatDto From(bool enabled, TimeSpan interval, DateTimeOffset? lastAt) =>
+        new(enabled, VpuSimulator.Application.Identity.DurationFormat.Format(interval), interval.TotalSeconds, lastAt);
+}
+
+public sealed record PatchHeartbeatRequest(
+    [property: JsonPropertyName("interval")] string? Interval,
+    [property: JsonPropertyName("enabled")] bool? Enabled);
+
+public sealed record PatchIdentityRequest(
+    [property: JsonPropertyName("heartbeat")] PatchHeartbeatRequest? Heartbeat,
+    [property: JsonPropertyName("enabled")] bool? Enabled,
+    [property: JsonPropertyName("profile")] string? Profile,
+    [property: JsonPropertyName("display_name")] string? DisplayName);
 
 public sealed record RuleDto(
     [property: JsonPropertyName("roi_id")] int RoiId,
@@ -34,7 +58,10 @@ public sealed record TaskDto(
     [property: JsonPropertyName("source_info")] SourceInfoDto? SourceInfo,
     [property: JsonPropertyName("url")] string? Url,
     [property: JsonPropertyName("capability")] CapabilityDto? Capability,
-    [property: JsonPropertyName("eps")] double Eps);
+    [property: JsonPropertyName("eps")] double Eps,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("off_reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OffReason);
 
 public sealed record UnitDto(
     [property: JsonPropertyName("app_id")] string AppId,
@@ -58,6 +85,7 @@ public sealed record UnitDto(
     [property: JsonPropertyName("reset_timer_sec")] double? ResetTimerSec,
     [property: JsonPropertyName("eps")] double Eps,
     [property: JsonPropertyName("last_result")] string?  LastResult,
+    [property: JsonPropertyName("off_reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OffReason,
     [property: JsonPropertyName("rule_conf"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? RuleConf);
 
 public sealed record StatusDto(
@@ -95,6 +123,10 @@ public sealed record UnitRefDto(
 /// <summary>Body của POST .../auto. Auto là bool? để thiếu trường thì báo 400, không thì hiểu là false.</summary>
 public sealed record SetAutoRequest(
     [property: JsonPropertyName("auto")] bool? Auto);
+
+/// <summary>Body của PATCH /tasks/{app}/{task}. Enabled là bool? để thiếu trường thì báo 400.</summary>
+public sealed record PatchTaskRequest(
+    [property: JsonPropertyName("enabled")] bool? Enabled);
 
 public sealed record UnitAutoDto(
     [property: JsonPropertyName("app_id")] string AppId,
@@ -150,3 +182,35 @@ public sealed record CapabilityDto(
     [property: JsonPropertyName("width")] int? Width,
     [property: JsonPropertyName("height")] int? Height,
     [property: JsonPropertyName("fps")] int? Fps);
+    
+public sealed record ScenarioIssueDto(
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("detail")] string Detail);
+
+public sealed record ScenarioInfoDto(
+    [property: JsonPropertyName("vpu_count")] int VpuCount,
+    [property: JsonPropertyName("vps_count")] int VpsCount,
+    [property: JsonPropertyName("task_count")] int TaskCount,
+    [property: JsonPropertyName("rule_count")] int RuleCount,
+    [property: JsonPropertyName("seed")] long? Seed,
+    [property: JsonPropertyName("loaded_at")] DateTimeOffset LoadedAt);
+
+public sealed record ScenarioValidationDto(
+    [property: JsonPropertyName("issues")] IReadOnlyList<ScenarioIssueDto> Issues,
+    [property: JsonPropertyName("ok_identities")] int OkIdentities,
+    [property: JsonPropertyName("ok_tasks")] int OkTasks);
+
+public sealed record ScenarioErrorDto(
+    [property: JsonPropertyName("error")] string Error,
+    [property: JsonPropertyName("issues")] IReadOnlyList<ScenarioIssueDto> Issues);
+
+public sealed record ScenarioAppliedDto(
+    [property: JsonPropertyName("identities_added")] int IdentitiesAdded,
+    [property: JsonPropertyName("tasks_added")] int TasksAdded,
+    [property: JsonPropertyName("rules_added")] int RulesAdded,
+    [property: JsonPropertyName("issues")] IReadOnlyList<ScenarioIssueDto> Issues);
+
+public sealed record ScenarioClearedDto(
+    [property: JsonPropertyName("identities_removed")] int IdentitiesRemoved,
+    [property: JsonPropertyName("tasks_removed")] int TasksRemoved);

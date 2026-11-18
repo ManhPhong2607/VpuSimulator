@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+ <ItemGroup>
+  <ProjectReference Include="..\..\src\VpuSimulator.Domain\VpuSimulator.Domain.csproj" />
+  <ProjectReference Include="..\..\src\VpuSimulator.Infrastructure\VpuSimulator.Infrastructure.csproj" />
+  <ProjectReference Include="..\..\src\VpuSimulator.Rules\VpuSimulator.Rules.csproj" />
+</ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="VpuSimulator.Domain" />
+    <Using Include="VpuSimulator.Domain.Entities" />
+    <Using Include="VpuSimulator.Domain.RuleContracts" />
+    <Using Include="VpuSimulator.Domain.Events" />
+    <Using Include="VpuSimulator.Domain.Enums" />
+    <Using Include="VpuSimulator.Domain.ValueObjects" />
+    <Using Include="VpuSimulator.Domain.FollowUp" />
+    <Using Include="VpuSimulator.Infrastructure" />
+    <Using Include="VpuSimulator.Infrastructure.Persistence" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="GroundTruthTests\" />
+  </ItemGroup>
+
+</Project>

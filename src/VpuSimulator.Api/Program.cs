@@ -25,6 +25,8 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+app.UseMiddleware<BearerAuthMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

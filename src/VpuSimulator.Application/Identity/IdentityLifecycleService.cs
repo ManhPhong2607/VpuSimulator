@@ -23,11 +23,21 @@ public enum IdentityOpResult
     UnknownProfile,
 }
 
+public enum HeartbeatUpdateResult
+{
+    Updated,
+    NotFound,
+    Invalid,
+}
+
 public sealed record IdentityStatus(
     string AppId,
     bool IsConnected,
     long HeartbeatFailures,
-    DateTimeOffset? LastHeartbeatAt);
+    DateTimeOffset? LastHeartbeatAt,
+    TimeSpan HeartbeatInterval,
+    bool Enabled,
+    bool HeartbeatEnabled);
 
 /// <summary>
 /// Quản lý vòng đời các identity: thêm lúc khởi động hoặc runtime, gỡ, tắt có trật tự
@@ -102,7 +112,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         {
             return IdentityOpResult.UnknownBroker;
         }
-        
+
         SimulationProfile? profile = null;
         if (!string.IsNullOrWhiteSpace(options.Profile))
         {
@@ -112,7 +122,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                 return IdentityOpResult.UnknownProfile;
             }
         }
-        
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -132,16 +142,19 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                     brokerName);
                 return IdentityOpResult.Failed;
             }
-            
+
             if (profile is not null)
             {
                 _units?.SetIdentityProfile(appId, profile);
             }
+
             var registered = false;
             CancellationTokenSource? cts = null;
             try
             {
                 cts = new CancellationTokenSource();
+                var power = new IdentityPower();
+                var gated = new GatedMessageBroker(session, () => power.VpuEnabled);
                 var loop = new HeartbeatLoop
                 (session,
                     appId,
@@ -151,26 +164,38 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                 // Mỗi lần (re)subscribe → phát status running cấp process
                 session.OnConnectedAsync = async token =>
                 {
+                    // VPU Off: không phát gì, kể cả sau khi nối lại (contract 10.2-1)
+                    if (!power.VpuEnabled)
+                    {
+                        return;
+                    }
+
                     // Thứ tự bắt buộc: running trước, rồi heartbeat ngay, để VMS không phải chờ thêm một chu kỳ sau khi nối lại.
                     await PublishProcessStatusAsync(session, appId, StatusMessages.ProcessRunning, token)
                         .ConfigureAwait(false);
+                    if (!power.HeartbeatEnabled)
+                    {
+                        return;
+                    }
+
                     await session.PublishAsync(RoutingKeys.Status(appId),
                         StatusMessages.Heartbeat(appId, _time.GetUtcNow()), token).ConfigureAwait(false);
                     loop.RecordHeartbeatSuccess();
                 };
                 // Mọi lệnh VMS gửi xuống identity này đi vào một handler chung, kèm appId để handler biết thuộc identity nào.
+                // Handler nhận broker đã qua cổng: khi VPU Off thì status phản hồi bị bỏ nhưng task vẫn được lưu.
                 // Phải đặt TRƯỚC StartAsync, để không mất bản tin nào ngay sau khi subscribe.
                 if (_inboundHandler is not null)
                 {
                     session.OnMessageAsync = (message, token) =>
-                        _inboundHandler.HandleAsync(appId, session, message, token);
+                        _inboundHandler.HandleAsync(appId, gated, message, token);
                 }
 
                 await session.StartAsync(cancellationToken).ConfigureAwait(false);
 
                 var loopTask = loop.RunAsync(cts.Token); // chạy tới await đầu tiên rồi trả Task về
 
-                _identities[appId] = new RunningIdentity(session, cts, loop, loopTask);
+                _identities[appId] = new RunningIdentity(session, gated, power, cts, loop, loopTask);
                 registered = true;
                 return IdentityOpResult.Added;
             }
@@ -188,7 +213,6 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
                     await DisposeSessionAsync(session, appId).ConfigureAwait(false);
                     _units?.ForgetIdentity(appId);
                 }
-                
             }
         }
         finally
@@ -341,24 +365,91 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         return true;
     }
 
+    private sealed class IdentityPower
+    {
+        public volatile bool VpuEnabled = true;
+        public volatile bool HeartbeatEnabled = true;
+    }
+
     private sealed class RunningIdentity(
         IBrokerSession session,
+        IMessageBroker gated,
+        IdentityPower power,
         CancellationTokenSource cts,
         HeartbeatLoop loop,
         Task loopTask)
     {
         public IBrokerSession Session { get; } = session;
+        public IMessageBroker Gated { get; } = gated;
+        public IdentityPower Power { get; } = power;
         public CancellationTokenSource Cts { get; } = cts;
         public HeartbeatLoop Loop { get; } = loop;
         public Task LoopTask { get; } = loopTask;
         public int Stopping;
     }
 
+    /// <summary>
+    /// Đổi chu kỳ heartbeat của identity đang chạy. Cùng quy tắc lúc tạo: parse được, ≤ 0 nghĩa là 30s.
+    /// Khác lúc tạo: chuỗi rỗng bị từ chối (PATCH phải nói rõ muốn gì).
+    /// </summary>
+    public HeartbeatUpdateResult SetHeartbeatInterval(string appId, string? text)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        if (!_identities.TryGetValue(appId, out var running))
+        {
+            return HeartbeatUpdateResult.NotFound;
+        }
+
+        if (string.IsNullOrWhiteSpace(text) || !TryResolveInterval(text, out var interval))
+        {
+            return HeartbeatUpdateResult.Invalid;
+        }
+
+        running.Loop.SetInterval(interval);
+        _logger.LogInformation("Identity {AppId}: đổi chu kỳ heartbeat thành {Interval}", appId, interval);
+        return HeartbeatUpdateResult.Updated;
+    }
+    
+    /// <summary>VPU On/Off. Off: ngừng heartbeat và mọi bản tin ra, mọi unit ngừng phát; session vẫn chạy, lệnh VMS vẫn được lưu. False nếu không có identity.</summary>
+    public bool SetEnabled(string appId, bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        if (!_identities.TryGetValue(appId, out var running))
+        {
+            return false;
+        }
+
+        running.Power.VpuEnabled = enabled;                                  // cổng trước
+        running.Loop.Enabled = enabled && running.Power.HeartbeatEnabled;
+        _units?.SetIdentityOff(appId, !enabled);                             // rồi unit
+        _logger.LogInformation("Identity {AppId}: VPU {State}", appId, enabled ? "On" : "Off");
+        return true;
+    }
+
+    /// <summary>Bật/tắt riêng heartbeat. Tắt thì VMS coi VPU offline (contract 10.2-2). False nếu không có identity.</summary>
+    public bool SetHeartbeatEnabled(string appId, bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(appId);
+
+        if (!_identities.TryGetValue(appId, out var running))
+        {
+            return false;
+        }
+
+        running.Power.HeartbeatEnabled = enabled;
+        running.Loop.Enabled = enabled && running.Power.VpuEnabled;
+        _logger.LogInformation("Identity {AppId}: heartbeat {State}", appId, enabled ? "bật" : "tắt");
+        return true;
+    }
+
     public IReadOnlyList<IdentityStatus> GetStatuses() =>
         _identities.Select(kv => new IdentityStatus(kv.Key, kv.Value.Session.IsConnected,
-                kv.Value.Loop.PublishFailureCount, kv.Value.Loop.LastHeartbeatAt))
+                kv.Value.Loop.PublishFailureCount, kv.Value.Loop.LastHeartbeatAt, kv.Value.Loop.Interval,
+                kv.Value.Power.VpuEnabled, kv.Value.Power.HeartbeatEnabled))
             .OrderBy(s => s.AppId, StringComparer.Ordinal).ToList();
 
     public IMessageBroker? TryGetBroker(string appId) =>
-        _identities.TryGetValue(appId, out var running) ? running.Session : null;
+        _identities.TryGetValue(appId, out var running) ? running.Gated : null;
 }

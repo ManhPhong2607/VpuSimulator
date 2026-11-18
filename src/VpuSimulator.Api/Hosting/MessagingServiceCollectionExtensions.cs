@@ -5,6 +5,7 @@ using VpuSimulator.Application.Interfaces;
 using VpuSimulator.Application.Interfaces.Messaging;
 using VpuSimulator.Application.Interfaces.Simulation;
 using VpuSimulator.Application.Options;
+using VpuSimulator.Application.Scenario;
 using VpuSimulator.Application.Scheduling;
 using VpuSimulator.Application.State;
 using VpuSimulator.Domain.Enums;
@@ -37,7 +38,7 @@ public static class MessagingServiceCollectionExtensions
         }
 
         services.AddSingleton(settings);
-        
+
         var badProfiles = options.Identities
             .Where(i => !string.IsNullOrWhiteSpace(i.Profile) && !settings.Profiles.ContainsKey(i.Profile!))
             .Select(i => $"Messaging:Identities[{i.AppId}]:Profile = '{i.Profile}': profile không tồn tại. " +
@@ -46,13 +47,14 @@ public static class MessagingServiceCollectionExtensions
         if (badProfiles.Count > 0)
         {
             throw new InvalidOperationException(
-                "Cấu hình identity không hợp lệ:" + Environment.NewLine + string.Join(Environment.NewLine, badProfiles));
+                "Cấu hình identity không hợp lệ:" + Environment.NewLine +
+                string.Join(Environment.NewLine, badProfiles));
         }
-        
+
         services.AddSingleton(options);
 
         services.AddSingleton(TimeProvider.System);
-        
+
         services.AddSingleton(new AppClock(TimeProvider.System.GetUtcNow())); // truyền instance: tạo ngay lúc khởi động
 
         services.AddSingleton<IMessageBrokerFactory>(sp => new RabbitMqBrokerFactory(
@@ -120,6 +122,11 @@ public static class MessagingServiceCollectionExtensions
             units: sp.GetService<IUnitRegistry>(),
             profileResolver: name => sp.GetRequiredService<SimulationSettings>().Profiles.GetValueOrDefault(name),
             correlationStore: sp.GetService<ICorrelationStore>()));
+
+        services.AddSingleton(sp => new ScenarioLoader(
+            sp.GetRequiredService<IdentityLifecycleService>(),
+            sp.GetRequiredService<ITaskStore>(),
+            sp.GetRequiredService<TimeProvider>()));
 
         services.AddHostedService<IdentityHostedService>();
         services.AddSingleton<EpsMeter>();
