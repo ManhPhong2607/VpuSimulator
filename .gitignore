@@ -1,0 +1,8 @@
+# ---- Backend (.NET) ----
+.vs/
+**/bin/
+**/obj/
+*.csproj.user
+
+# ---- Frontend (Next.js) ----
+# web/.gitignore handles its own ignores (node_modules, .next, .env*, etc.)

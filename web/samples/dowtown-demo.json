@@ -1,0 +1,53 @@
+{
+  "seed": 4471,
+  "identities": [
+    {
+      "app_id": "cam-gate-01",
+      "profile": "normal",
+      "heartbeat": "30s",
+      "tasks": [
+        {
+          "task": "t-gate-01",
+          "uuid": "4ba2fa87-7516-4756-af74-dba1d7fce4c9",
+          "url": "rtsp://10.1.100.4:8554/gate-01",
+          "source_info": { "name": "Cổng chính" },
+          "rule_conf": [
+            { "id": 1, "name": "License Plate", "type": 23, "aiFlowCode": 0 },
+            { "id": 2, "name": "Wrong Way", "type": 16, "aiFlowCode": 9 }
+          ]
+        }
+      ]
+    },
+    {
+      "app_id": "cam-gate-02",
+      "heartbeat": "45s",
+      "tasks": [
+        {
+          "task": "t-gate-02",
+          "uuid": "7c10aa11-0000-4000-8000-0000000fa1e2",
+          "url": "rtsp://10.1.100.4:8554/gate-02",
+          "source_info": { "name": "Cổng phụ" },
+          "rule_conf": [
+            { "id": 1, "name": "Person Recognition", "type": 1, "aiFlowCode": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "app_id": "cam-junction-01",
+      "profile": "storm",
+      "tasks": [
+        {
+          "task": "t-junction-01",
+          "uuid": "e90d0000-0000-4000-8000-000000000b44",
+          "url": "rtsp://10.1.100.4:8554/junction-01",
+          "source_info": { "name": "Ngã tư trung tâm" },
+          "rule_conf": [
+            { "id": 1, "name": "Traffic Signal Violation", "type": 22, "aiFlowCode": 5 },
+            { "id": 2, "name": "Speeding", "type": 30 }
+          ]
+        }
+      ]
+    }
+  ]
+}

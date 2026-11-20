@@ -1,0 +1,31 @@
+{
+  "seed": 4471,
+  "identities": [
+    {
+      "app_id": "vpu-gate-a",
+      "tasks": [
+        { "task": "t-a", "rule_conf": [{ "id": 1, "name": "License Plate", "type": 23 }] }
+      ]
+    },
+    {
+      "app_id": "cam-b-01",
+      "profile": "turbo",
+      "heartbeat": "30s",
+      "tasks": [
+        { "task": "t-b1", "rule_conf": [{ "id": 1, "name": "Traffic Signal Violation", "type": "twenty-two" }] },
+        { "task": "t-b1", "rule_conf": [{ "id": 1, "name": "Speeding", "type": 30 }] }
+      ]
+    },
+    {
+      "app_id": "cam-b-02",
+      "heartbeat": "thirty",
+      "tasks": [{ "task": "t-b2", "rule_conf": [] }]
+    },
+    {
+      "app_id": "cam-ok-01",
+      "tasks": [
+        { "task": "t-ok", "rule_conf": [{ "id": 1, "name": "License Plate", "type": 23 }] }
+      ]
+    }
+  ]
+}
