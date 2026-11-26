@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VpuSimulator.Application.Logging;
+using VpuSimulator.Application.Scheduling;
 
 namespace VpuSimulator.Api.Endpoints;
 
@@ -104,6 +105,7 @@ public sealed record StatusDto(
     [property: JsonPropertyName("eps_actual")] double EpsActual,
     [property: JsonPropertyName("eps_actual_by_identity")] IReadOnlyDictionary<string, double> EpsActualByIdentity,
     [property: JsonPropertyName("eps_target")] double? EpsTarget,
+    [property: JsonPropertyName("eps_target_by_identity")] IReadOnlyDictionary<string, double?> EpsTargetByIdentity,
     [property: JsonPropertyName("commands")] IReadOnlyDictionary<string, long> Commands);
 
 public sealed record StopTasksResultDto(
@@ -276,3 +278,22 @@ public sealed record LogLineDto(
 public sealed record SetLogLevelRequest([property: JsonPropertyName("level")] string? Level);
 
 public sealed record SetLogVerboseRequest([property: JsonPropertyName("enabled")] bool? Enabled);
+
+// Body của POST/PUT /profiles (contract 4.5, đơn vị giây theo 10.1). Mọi trường nullable để thiếu trường thì báo 400,
+// không bị hiểu thành 0 (FR-CFG-9). ramp_* được phép null.
+public sealed record ProfileRequest(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("interval")] double? Interval,
+    [property: JsonPropertyName("jitter_min")] double? JitterMin,
+    [property: JsonPropertyName("jitter_max")] double? JitterMax,
+    [property: JsonPropertyName("min_gap")] double? MinGap,
+    [property: JsonPropertyName("bypass_frames")] bool? BypassFrames,
+    [property: JsonPropertyName("coalesce_timestamps")] bool? CoalesceTimestamps,
+    [property: JsonPropertyName("ramp_from")] double? RampFrom,
+    [property: JsonPropertyName("ramp_to")] double? RampTo,
+    [property: JsonPropertyName("ramp_duration")] double? RampDuration)
+{
+    public ProfileInput ToInput() =>
+        new(Name, Interval, JitterMin, JitterMax, MinGap, BypassFrames, CoalesceTimestamps,
+            RampFrom, RampTo, RampDuration);
+}

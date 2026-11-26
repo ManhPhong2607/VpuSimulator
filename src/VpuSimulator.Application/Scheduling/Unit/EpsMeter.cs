@@ -4,7 +4,8 @@ public sealed record EpsReading(
     double Total,
     IReadOnlyDictionary<string, double> ByIdentity,
     double? Target,
-    IReadOnlyDictionary<UnitKey, double>? ByUnit = null)
+    IReadOnlyDictionary<UnitKey, double>? ByUnit = null,
+    IReadOnlyDictionary<string, double>? TargetByIdentity = null)
 {
     public double ForUnit(UnitKey key) =>
         ByUnit is not null && ByUnit.TryGetValue(key, out var v) ? v : 0;
@@ -51,6 +52,7 @@ public sealed class EpsMeter
             var delta = new Dictionary<UnitKey, long>();
             var seen = new HashSet<UnitKey>();
             double? target = null;
+            var targetByIdentity = new Dictionary<string, double>(StringComparer.Ordinal);
 
             foreach (var s in snapshots)
             {
@@ -68,6 +70,7 @@ public sealed class EpsMeter
                 if (s.TargetEps is { } t)
                 {
                     target = (target ?? 0) + t;
+                    targetByIdentity[s.Key.AppId] = targetByIdentity.GetValueOrDefault(s.Key.AppId) + t;
                 }
             }
 
@@ -98,7 +101,7 @@ public sealed class EpsMeter
                 byIdentity[key.AppId] = byIdentity.GetValueOrDefault(key.AppId) + byUnit[key];
             }
 
-            _current = new EpsReading(byIdentity.Values.Sum(), byIdentity, target, byUnit);
+            _current = new EpsReading(byIdentity.Values.Sum(), byIdentity, target, byUnit, targetByIdentity);
         }
     }
 }

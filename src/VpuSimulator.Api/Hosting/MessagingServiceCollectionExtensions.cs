@@ -40,7 +40,12 @@ public static class MessagingServiceCollectionExtensions
         }
 
         services.AddSingleton(settings);
-
+        
+        services.AddSingleton(sp => new ProfileCatalog(sp.GetRequiredService<SimulationSettings>()));
+        services.AddSingleton(sp => new ProfileService(
+            sp.GetRequiredService<ProfileCatalog>(),
+            sp.GetRequiredService<IUnitRegistry>()));
+        
         var badProfiles = options.Identities
             .Where(i => !string.IsNullOrWhiteSpace(i.Profile) && !settings.Profiles.ContainsKey(i.Profile!))
             .Select(i => $"Messaging:Identities[{i.AppId}]:Profile = '{i.Profile}': profile không tồn tại. " +
@@ -144,7 +149,7 @@ public static class MessagingServiceCollectionExtensions
             inboundHandler: sp.GetService<IInboundMessageHandler>(),
             taskStore: sp.GetService<ITaskStore>(),
             units: sp.GetService<IUnitRegistry>(),
-            profileResolver: name => sp.GetRequiredService<SimulationSettings>().Profiles.GetValueOrDefault(name),
+            profileResolver: name => sp.GetRequiredService<ProfileCatalog>().Get(name),
             correlationStore: sp.GetService<ICorrelationStore>(),
             sse: sp.GetService<SseEventBus>()));
 

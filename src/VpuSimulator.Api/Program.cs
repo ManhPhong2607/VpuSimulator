@@ -92,6 +92,7 @@ app.MapGet("/api/v1/stream",
     {
         ctx.Response.ContentType = "text/event-stream";
         ctx.Response.Headers.CacheControl = "no-cache";
+        ctx.Response.Headers["X-Accel-Buffering"] = "no";
         using var sub = bus.Subscribe(out var reader);
         await ctx.Response.Body.FlushAsync(ct);
         try
@@ -126,6 +127,6 @@ app.MapGet("/api/v1/stream",
 app.MapControlApiEndpoints();
 
 // Fallback SPA route cho Next.js Console client-side routing
-app.MapFallbackToFile("index.html");
+app.MapFallback("/api/{**path}", () => Results.NotFound(new ErrorDto("Không có endpoint này.")));
 
 app.Run();
