@@ -5,6 +5,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using VpuSimulator.Application.Interfaces;
 using VpuSimulator.Application.Interfaces.Messaging;
+using VpuSimulator.Application.Logging;
 using VpuSimulator.Application.Messaging;
 using VpuSimulator.Application.Options;
 
@@ -31,6 +32,7 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _publishLock = new(1, 1);
     private static readonly TimeSpan StableConnection = TimeSpan.FromSeconds(30);
+    private readonly RuntimeLogSettings? _logSettings;
 
     private Task? _runTask;
     private volatile IChannel? _channel;
@@ -44,7 +46,8 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
         string appId,
         TimeProvider time,
         ILogger? logger = null,
-        JsonSerializerOptions? json = null)
+        JsonSerializerOptions? json = null,
+        RuntimeLogSettings? logSettings = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(brokerName);
@@ -58,6 +61,7 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
         _logger = logger ?? NullLogger.Instance;
         // Mặc định của System.Text.Json KHÔNG bỏ key null → "detail": null vẫn có mặt. Đừng bật DefaultIgnoreCondition.
         _json = json ?? new JsonSerializerOptions();
+        _logSettings = logSettings;
     }
 
     public bool IsConnected => _connected;
@@ -122,6 +126,7 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
             {
                 _publishLock.Release();
             }
+            LogSent(routingKey, body);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -129,6 +134,23 @@ public sealed class RabbitMqBrokerSession : IBrokerSession
             throw new TimeoutException(
                 $"Gửi tới broker '{_brokerName}' quá {_options.PublishTimeout.TotalSeconds:0.#}s (identity '{_appId}').");
         }
+    }
+    
+    // FR-OBS-3: mọi bản tin đã gửi đều có log "message sent". Bình thường ở debug; verbose thì ở info kèm payload.
+    private void LogSent(string routingKey, byte[] body)
+    {
+        var verbose = _logSettings?.Verbose == true;
+        var level = verbose ? LogLevel.Information : LogLevel.Debug;
+        if (!_logger.IsEnabled(level)) return;   // mức log đang cao hơn thì khỏi tốn công dựng chuỗi
+
+        var info = MessageSentLog.Describe(routingKey, body, verbose, _logSettings?.MaxBodyLog ?? 4096);
+        if (verbose)
+            _logger.LogInformation(
+                "message sent app={AppId} {RoutingKey} kind={Kind} size={SizeBytes} truncated={Truncated} payload={Payload}",
+                _appId, routingKey, info.Kind, info.SizeBytes, info.Truncated, info.Payload);
+        else
+            _logger.LogDebug("message sent app={AppId} {RoutingKey} kind={Kind} size={SizeBytes}",
+                _appId, routingKey, info.Kind, info.SizeBytes);
     }
 
     private async Task RunAsync(CancellationToken ct)

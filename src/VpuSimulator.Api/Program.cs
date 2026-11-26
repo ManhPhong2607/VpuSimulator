@@ -1,10 +1,40 @@
 using System.Text.Json;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 using VpuSimulator.Api.Hosting;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Api.Endpoints;
+using VpuSimulator.Api.Logging;
+using VpuSimulator.Application.Logging;
 using VpuSimulator.Application.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Log: công tắc mức log (đổi lúc chạy, FR-OBS-2) + bộ đệm 2000 dòng cho Console
+// Mức log ban đầu lấy từ cấu hình (Log:Level); không đặt thì là info. Giá trị sai thì dừng ngay, không bỏ qua lặng lẽ
+var levelText = builder.Configuration["Log:Level"];
+var initialLevel = LogEventLevel.Information;
+if (!string.IsNullOrWhiteSpace(levelText) && !LogLevels.TryParse(levelText, out initialLevel))
+    throw new InvalidOperationException(
+        $"Log:Level = '{levelText}' không hợp lệ. Chấp nhận: debug, info, warn, error.");
+var levelSwitch = new LoggingLevelSwitch(initialLevel);
+var logBuffer = new LogBuffer(builder.Configuration.GetValue("Log:BufferSize", 2000));
+var runtimeLog = new RuntimeLogSettings(
+    verbose: builder.Configuration.GetValue("Log:Verbose", false),
+    maxBodyLog: builder.Configuration.GetValue("Log:MaxBodyLog", 4096));
+builder.Services.AddSingleton(levelSwitch);
+builder.Services.AddSingleton(logBuffer);
+builder.Services.AddSingleton(runtimeLog);
+
+builder.Services.AddSingleton<VpuSimulator.Application.Events.SseEventBus>();
+
+builder.Host.UseSerilog((_, _, logging) => logging
+    .MinimumLevel.ControlledBy(levelSwitch)
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning) // giữ log request ồn ào ngoài bộ đệm
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.Sink(new LogBufferSink(logBuffer)));
 
 builder.Services.AddVpuMessaging(builder.Configuration);
 
@@ -57,22 +87,41 @@ app.MapGet("/readyz", (IdentityLifecycleService identities) =>
 });
 
 // Server-Sent Events endpoint chuẩn hóa theo contract
-app.MapGet("/api/v1/stream", async (HttpContext ctx, CancellationToken ct) =>
-{
-    ctx.Response.ContentType = "text/event-stream";
-    ctx.Response.Headers.CacheControl = "no-cache";
-    try
+app.MapGet("/api/v1/stream",
+    async (HttpContext ctx, VpuSimulator.Application.Events.SseEventBus bus, CancellationToken ct) =>
     {
-        while (!ct.IsCancellationRequested)
+        ctx.Response.ContentType = "text/event-stream";
+        ctx.Response.Headers.CacheControl = "no-cache";
+        using var sub = bus.Subscribe(out var reader);
+        await ctx.Response.Body.FlushAsync(ct);
+        try
         {
-            var hb = new { type = "heartbeat", timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
-            await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(hb)}\n\n", ct);
-            await ctx.Response.Body.FlushAsync(ct);
-            await Task.Delay(5000, ct);
+            while (!ct.IsCancellationRequested)
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+                try
+                {
+                    var ev = await reader.ReadAsync(timeoutCts.Token);
+                    await ctx.Response.WriteAsync($"event: {ev.Type}\ndata: {JsonSerializer.Serialize(ev.Data)}\n\n",
+                        ct);
+                    await ctx.Response.Body.FlushAsync(ct);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Quá 5s không có sự kiện -> gửi heartbeat giữ kết nối
+                    var hb = new { type = "heartbeat", timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
+                    await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(hb)}\n\n", ct);
+                    await ctx.Response.Body.FlushAsync(ct);
+                }
+            }
         }
-    }
-    catch (OperationCanceledException) { /* client ngắt kết nối */ }
-});
+        catch (OperationCanceledException)
+        {
+            /* client ngắt kết nối */
+        }
+    });
+
 // Control API: các endpoint đọc
 app.MapControlApiEndpoints();
 

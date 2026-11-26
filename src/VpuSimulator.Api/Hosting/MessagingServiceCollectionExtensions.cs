@@ -1,9 +1,11 @@
 using VpuSimulator.Application.Commands;
 using VpuSimulator.Application.Configuration;
+using VpuSimulator.Application.Events;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Application.Interfaces;
 using VpuSimulator.Application.Interfaces.Messaging;
 using VpuSimulator.Application.Interfaces.Simulation;
+using VpuSimulator.Application.Logging;
 using VpuSimulator.Application.Options;
 using VpuSimulator.Application.Scenario;
 using VpuSimulator.Application.Scheduling;
@@ -60,9 +62,11 @@ public static class MessagingServiceCollectionExtensions
         services.AddSingleton<IMessageBrokerFactory>(sp => new RabbitMqBrokerFactory(
             options.Brokers,
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<ILoggerFactory>()));
+            sp.GetRequiredService<ILoggerFactory>(),
+            sp.GetService<RuntimeLogSettings>()));
 
         // Kho lưu trữ correlation liên kết dữ liệu giữa các bài toán (#1 và #6)
+        services.AddSingleton(CorrelationOptions.Default);
         services.AddSingleton<ICorrelationStore, InMemoryCorrelationStore>();
 
         // Chính sách follow-up cho các rule có chu kỳ tiếp diễn (Illegal Stop, Traffic Signal Violation)
@@ -76,18 +80,38 @@ public static class MessagingServiceCollectionExtensions
         services.AddSingleton<CommandStats>();
 
         // Scheduler: mỗi rule của mỗi task đang chạy là một emission unit. Sử dụng emitter thật.
-        services.AddSingleton(sp => new UnitRegistry(
-            SimulationSeed.Resolve(sp.GetRequiredService<SimulationSettings>().Seed),
-            sp.GetRequiredService<SimulationSettings>().DefaultProfile,
-            sp.GetRequiredService<SimulationSettings>().ArmDelay,
-            sp.GetRequiredService<TimeProvider>(),
-            UnitEmitter.CreateFactory(
-                sp.GetRequiredService<IRuleHandlerRegistry>(),
-                appId => sp.GetRequiredService<IdentityLifecycleService>().TryGetBroker(appId),
-                sp.GetRequiredService<ICorrelationStore>(),
-                sp.GetService<ILogger<UnitRunner>>()),
-            fixedPeriodSeconds: view => DensityPeriod.Resolve(view, sp.GetRequiredService<IRuleHandlerRegistry>()),
-            loggerFactory: sp.GetRequiredService<ILoggerFactory>()));
+        services.AddSingleton(sp =>
+        {
+            var sse = sp.GetService<SseEventBus>();
+            return new UnitRegistry(
+                SimulationSeed.Resolve(sp.GetRequiredService<SimulationSettings>().Seed),
+                sp.GetRequiredService<SimulationSettings>().DefaultProfile,
+                sp.GetRequiredService<SimulationSettings>().ArmDelay,
+                sp.GetRequiredService<TimeProvider>(),
+                UnitEmitter.CreateFactory(
+                    sp.GetRequiredService<IRuleHandlerRegistry>(),
+                    appId => sp.GetRequiredService<IdentityLifecycleService>().TryGetBroker(appId),
+                    sp.GetRequiredService<ICorrelationStore>(),
+                    sp.GetService<ILogger<UnitRunner>>(),
+                    onEmitted: key =>
+                    {
+                        // storm phát nhiều bản tin mỗi giây: chưa có client SSE nào nghe thì khỏi dựng object
+                        if (sse is { HasSubscribers: true })
+                        {
+                            sse.Publish("emitted", new
+                            {
+                                type = "emitted",
+                                app_id = key.AppId,
+                                task = key.TaskId,
+                                roi = key.RoiId,
+                                rule = key.RuleName
+                            });
+                        }
+                    }),
+                fixedPeriodSeconds: view => DensityPeriod.Resolve(view, sp.GetRequiredService<IRuleHandlerRegistry>()),
+                loggerFactory: sp.GetRequiredService<ILoggerFactory>(),
+                sse: sse);
+        });
         services.AddSingleton<IUnitRegistry>(sp => sp.GetRequiredService<UnitRegistry>());
 
         services.AddSingleton<ITaskStore>(sp => new InMemoryTaskStore(sp.GetRequiredService<UnitRegistry>()));
@@ -121,7 +145,8 @@ public static class MessagingServiceCollectionExtensions
             taskStore: sp.GetService<ITaskStore>(),
             units: sp.GetService<IUnitRegistry>(),
             profileResolver: name => sp.GetRequiredService<SimulationSettings>().Profiles.GetValueOrDefault(name),
-            correlationStore: sp.GetService<ICorrelationStore>()));
+            correlationStore: sp.GetService<ICorrelationStore>(),
+            sse: sp.GetService<SseEventBus>()));
 
         services.AddSingleton(sp => new ScenarioLoader(
             sp.GetRequiredService<IdentityLifecycleService>(),

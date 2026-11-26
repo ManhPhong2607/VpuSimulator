@@ -1,15 +1,21 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Serilog.Core;
+using Serilog.Events;
 using VpuSimulator.Api.Hosting;
+using VpuSimulator.Api.Logging;
 using VpuSimulator.Application.Commands;
 using VpuSimulator.Application.Identity;
 using VpuSimulator.Application.Interfaces.Simulation;
+using VpuSimulator.Application.Logging;
 using VpuSimulator.Application.Options;
 using VpuSimulator.Application.Scenario;
 using VpuSimulator.Application.Scheduling;
 using VpuSimulator.Application.State;
 using VpuSimulator.Domain;
 using VpuSimulator.Domain.Enums;
+using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Infrastructure.Persistence;
 using VpuSimulator.Rules;
 
 namespace VpuSimulator.Api.Endpoints;
@@ -47,6 +53,15 @@ public static class ControlApiEndpoints
 
         api.MapGet("/profiles", GetProfiles);
         api.MapPost("/profiles/apply", ApplyProfile);
+
+        api.MapGet("/correlation", GetCorrelation);
+        api.MapDelete("/correlation", ClearCorrelation);
+        api.MapDelete("/correlation/{appId}/{key}", DeleteCorrelationEntry);
+
+        api.MapGet("/logs", GetLogs);
+        api.MapPost("/logs/level", SetLogLevel);
+        api.MapPost("/logs/verbose", SetLogVerbose);
+        api.MapGet("/config", GetConfig);
 
         return app;
     }
@@ -95,7 +110,7 @@ public static class ControlApiEndpoints
             HeartbeatDto.From(s.HeartbeatEnabled, s.HeartbeatInterval, s.LastHeartbeatAt),
             s.Enabled,
             IdentityStatusName(s.Enabled, tasks, s.HeartbeatEnabled));
-    
+
     private static IReadOnlyList<IdentityDto> GetIdentities(
         IdentityLifecycleService identities,
         ITaskStore tasks,
@@ -107,12 +122,12 @@ public static class ControlApiEndpoints
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
         return identities.GetStatuses()
-                .Select(s => ToIdentityDto(
-                    s,
-                    tasks.List(s.AppId).Count,
-                    unitCounts.GetValueOrDefault(s.AppId),
-                    units.IdentityProfileName(s.AppId),
-                    eps.Current.ByIdentity.GetValueOrDefault(s.AppId)))
+            .Select(s => ToIdentityDto(
+                s,
+                tasks.List(s.AppId).Count,
+                unitCounts.GetValueOrDefault(s.AppId),
+                units.IdentityProfileName(s.AppId),
+                eps.Current.ByIdentity.GetValueOrDefault(s.AppId)))
             .ToList();
     }
 
@@ -289,6 +304,7 @@ public static class ControlApiEndpoints
         {
             return Results.Conflict(new ErrorDto($"VPU '{appId}' đang Off, không phát được."));
         }
+
         var result = units.Trigger(appId, task, roi, rule);
 
         return result.Outcome switch
@@ -485,7 +501,7 @@ public static class ControlApiEndpoints
             .LogInformation("Control API: DELETE /identities gỡ identity {AppId}", appId);
         return Results.NoContent();
     }
-    
+
     // PATCH /api/v1/identities/{appId} body {"enabled"?, "heartbeat":{"interval"?, "enabled"?}} → 200 + identity
     // profile → 400 (dùng POST /profiles/apply, W-10). display_name → 400 (BE không lưu, FE theo BE).
     private static IResult PatchIdentity(
@@ -582,7 +598,7 @@ public static class ControlApiEndpoints
         IRuleHandlerRegistry registry,
         ILoggerFactory loggerFactory,
         [FromBody] JsonElement body,
-        [FromQuery(Name = "validate_only")] bool validateOnly = false, 
+        [FromQuery(Name = "validate_only")] bool validateOnly = false,
         CancellationToken cancellationToken = default)
     {
         var plan = ScenarioPlanner.Plan(
@@ -682,6 +698,189 @@ public static class ControlApiEndpoints
             .ToList();
     }
 
+    // GET /api/v1/correlation?app_id=&n=
+    // Các mục còn hạn của kho correlation, mới nhất trước (FR-COR-5). n mặc định 100. total là tổng số mục khớp
+    // bộ lọc (trước khi cắt còn n mục) để Console biết còn bao nhiêu mục chưa hiển thị
+    private static IResult GetCorrelation(
+        ICorrelationStore store,
+        CorrelationOptions options,
+        [FromQuery(Name = "app_id")] string? appId,
+        [FromQuery] int n = 100)
+    {
+        if (n < 1)
+        {
+            return Results.BadRequest(new ErrorDto("n phải là số nguyên từ 1 trở lên."));
+        }
+
+        // List đã loại mục hết hạn và sắp xếp mới nhất trước, nên chỉ cần lấy n mục đầu
+        var all = store.List(string.IsNullOrWhiteSpace(appId) ? null : appId);
+        var items = all
+            .Take(n)
+            .Select(e => new CorrelationItemDto(
+                e.AppId,
+                e.Key, // khoá của mục chính là event_key
+                e.Value is LicensePlateCorrelationValue plate ? plate.Label : null,
+                e.WrittenAt))
+            .ToList();
+
+        return Results.Ok(new CorrelationDto(
+            all.Count, DurationFormat.Format(options.Ttl), options.MaxPerIdentity, items));
+    }
+
+    // DELETE /api/v1/correlation?confirm=true: xoá toàn bộ kho của mọi identity (FR-COR-5, FR-CTL-5). 204; 400 nếu thiếu confirm
+    private static IResult ClearCorrelation(
+        ICorrelationStore store,
+        ILoggerFactory loggerFactory,
+        [FromQuery] bool confirm = false)
+    {
+        if (!confirm)
+        {
+            return Results.BadRequest(new ErrorDto(
+                "Thao tác này xoá toàn bộ correlation của mọi identity; cần thêm tham số confirm=true."));
+        }
+
+        var removed = store.List().Count;
+        store.ClearAll();
+        loggerFactory.CreateLogger("ControlApi")
+            .LogInformation("Control API: DELETE /correlation xoá {Count} mục", removed);
+        return Results.NoContent();
+    }
+
+    // DELETE /api/v1/correlation/{appId}/{key}?confirm=true: xoá một mục theo cặp (app_id, event_key) (contract 10.1).
+    // Dùng chính TryDelete của kho nên có nghĩa như "mục này đã bị tiêu thụ": rule Traffic Signal Violation sẽ không tìm thấy nó nữa.
+    // 204; 400 nếu thiếu confirm; 404 nếu không có mục (hoặc đã hết hạn)
+    private static IResult DeleteCorrelationEntry(
+        ICorrelationStore store,
+        ILoggerFactory loggerFactory,
+        string appId,
+        string key,
+        [FromQuery] bool confirm = false)
+    {
+        if (!confirm)
+        {
+            return Results.BadRequest(
+                new ErrorDto("Thao tác này xoá một mục correlation; cần thêm tham số confirm=true."));
+        }
+
+        if (!store.TryDelete(appId, key))
+        {
+            return Results.NotFound(new ErrorDto($"Không có mục correlation '{key}' của identity '{appId}'."));
+        }
+
+        loggerFactory.CreateLogger("ControlApi")
+            .LogInformation("Control API: DELETE /correlation/{AppId}/{Key}", appId, key);
+        return Results.NoContent();
+    }
+
+    // GET /api/v1/logs?n=100: n dòng log gần nhất, mới nhất trước (contract 9.9, FR-OBS-4).
+    private static IResult GetLogs(LogBuffer buffer, int n = 100)
+    {
+        if (n < 1) return Results.BadRequest(new ErrorDto("n phải ≥ 1."));
+        return Results.Ok(buffer.Latest(n).Select(LogLineDto.From).ToList());
+    }
+    
+        // POST /api/v1/logs/level: đổi mức log lúc runtime (FR-OBS-2, contract 4.1).
+    private static IResult SetLogLevel(
+        LoggingLevelSwitch levelSwitch,
+        ILoggerFactory loggerFactory,
+        SetLogLevelRequest? body)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.Level))
+            return Results.BadRequest(new ErrorDto("Thiếu trường bắt buộc: level."));
+
+        if (!LogLevels.TryParse(body.Level, out var target))
+            return Results.BadRequest(new ErrorDto(
+                $"Mức log '{body.Level}' không hợp lệ. Chấp nhận: debug, info, warn, error."));
+
+        levelSwitch.MinimumLevel = target;
+        var canonical = LogLevels.Name(target);
+        loggerFactory.CreateLogger("ControlApi")
+            .LogInformation("Control API: POST /logs/level đổi mức log sang {Level}", canonical);
+
+        return Results.Ok(new { level = canonical });
+    }
+
+    // POST /api/v1/logs/verbose: bật/tắt ghi payload bản tin vào log (FR-OBS-3, contract 4.1).
+    private static IResult SetLogVerbose(
+        RuntimeLogSettings runtimeLog,
+        ILoggerFactory loggerFactory,
+        SetLogVerboseRequest? body)
+    {
+        if (body?.Enabled is null)
+            return Results.BadRequest(new ErrorDto("Thiếu trường bắt buộc: enabled."));
+
+        runtimeLog.Verbose = body.Enabled.Value;
+        loggerFactory.CreateLogger("ControlApi")
+            .LogInformation("Control API: POST /logs/verbose đặt verbose={Verbose}", runtimeLog.Verbose);
+
+        return Results.Ok(new { verbose = runtimeLog.Verbose });
+    }
+
+    // GET /api/v1/config: cấu hình hiệu lực, phản ánh thay đổi runtime, che secret khác rỗng bằng "***" (FR-CFG-1, FR-CFG-6).
+    private static IResult GetConfig(
+        MessagingOptions messaging,
+        SimulationSettings simulation,
+        IUnitRegistry units,
+        CorrelationOptions correlation,
+        LoggingLevelSwitch levelSwitch,
+        RuntimeLogSettings runtimeLog,
+        LogBuffer logBuffer,
+        IConfiguration configuration)
+    {
+        static string? MaskSecret(string? secret) =>
+            string.IsNullOrEmpty(secret) ? secret : "***";
+
+        var brokers = messaging.Brokers.ToDictionary(
+            kv => kv.Key,
+            kv => new
+            {
+                host = kv.Value.Host,
+                port = kv.Value.Port,
+                virtual_host = kv.Value.VirtualHost,
+                username = kv.Value.Username,
+                password = MaskSecret(kv.Value.Password),
+                exchange = kv.Value.Exchange,
+                prefetch = kv.Value.Prefetch,
+                auto_ack = kv.Value.AutoAck,
+                reconnect_min = DurationFormat.Format(kv.Value.ReconnectMin),
+                reconnect_max = DurationFormat.Format(kv.Value.ReconnectMax),
+                publish_timeout = DurationFormat.Format(kv.Value.PublishTimeout),
+            },
+            StringComparer.OrdinalIgnoreCase);
+
+        return Results.Ok(new
+        {
+            api = new
+            {
+                listen = configuration["Api:Listen"] ?? "http://127.0.0.1:18080",
+                token = MaskSecret(configuration["Api:Token"]),
+            },
+            log = new
+            {
+                level = LogLevels.Name(levelSwitch.MinimumLevel),
+                verbose = runtimeLog.Verbose,
+                buffer_size = logBuffer.Capacity,
+                max_body_log = runtimeLog.MaxBodyLog,
+            },
+            scheduler = new
+            {
+                arm_delay = DurationFormat.Format(simulation.ArmDelay),
+                default_profile = simulation.DefaultProfile.Name,
+            },
+            simulation = new
+            {
+                seed = units.Seed.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ai_backend = "simulated",
+            },
+            correlation = new
+            {
+                ttl = DurationFormat.Format(correlation.Ttl),
+                max_per_identity = correlation.MaxPerIdentity,
+            },
+            brokers,
+        });
+    }
+
     // GET /api/v1/rules
     private static IReadOnlyList<RuleCatalogItemDto> GetRules() => RuleItems;
 
@@ -762,7 +961,8 @@ public static class ControlApiEndpoints
             resetTimer,
             eps.ForUnit(s.Key),
             LastResult(s),
-            UnitOffReason(s, task, rule, units.IsTaskManuallyOff(s.Key.AppId, s.Key.TaskId), units.IsIdentityOff(s.Key.AppId)),
+            UnitOffReason(s, task, rule, units.IsTaskManuallyOff(s.Key.AppId, s.Key.TaskId),
+                units.IsIdentityOff(s.Key.AppId)),
             includeRuleConf && rule is not null ? rule.Raw : null);
     }
 
@@ -782,7 +982,8 @@ public static class ControlApiEndpoints
 
     // Contract mục 3: ưu tiên vps_off (task cha tắt), sau đó lý do riêng của unit (vms hoặc manual)
     // vpu_off sẽ thêm khi chốt ngữ nghĩa "VPU Off". Unit đang bật thì không có lý do
-    private static string? UnitOffReason(UnitSnapshot s, ParsedTask? task, ParsedRule? rule, bool taskManuallyOff, bool identityOff)
+    private static string? UnitOffReason(UnitSnapshot s, ParsedTask? task, ParsedRule? rule, bool taskManuallyOff,
+        bool identityOff)
     {
         if (s.Auto)
         {

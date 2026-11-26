@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Application.Commands;
 using VpuSimulator.Application.State;
+using VpuSimulator.Application.Events;
 
 namespace VpuSimulator.Application.Scheduling;
 
@@ -104,6 +105,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
     private readonly Func<UnitConfigView, double?>? _fixedPeriodSeconds;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
+    private readonly SseEventBus? _sse;
 
     private readonly object _gate = new();
     private readonly Dictionary<UnitKey, Entry> _units = new();
@@ -124,7 +126,8 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         TimeProvider time,
         UnitEmitterFactory emitterFactory,
         Func<UnitConfigView, double?>? fixedPeriodSeconds = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        SseEventBus? sse = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(time);
@@ -144,6 +147,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         _fixedPeriodSeconds = fixedPeriodSeconds;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<UnitRegistry>();
+        _sse = sse;
         _logger.LogInformation("Simulation seed {Seed}, profile {Profile}, arm delay {ArmDelay}", seed, profile.Name,
             armDelay);
     }
@@ -158,6 +162,10 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         try
         {
             Reconcile(appId, result.Current);
+            if (result.Created)
+            {
+                _sse?.Publish("task_added", new { type = "task_added", app_id = appId, task = result.Current.TaskId });
+            }
         }
         catch (Exception ex)
         {
@@ -191,6 +199,11 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         foreach (var runner in stale)
         {
             DisposeInBackground(runner);
+        }
+
+        foreach (var task in removed)
+        {
+            _sse?.Publish("task_removed", new { type = "task_removed", app_id = appId, task = task.TaskId });
         }
     }
 
