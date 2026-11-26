@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using VpuSimulator.Application.Logging;
+using VpuSimulator.Application.Scheduling;
 
 namespace VpuSimulator.Api.Endpoints;
 
@@ -103,6 +105,7 @@ public sealed record StatusDto(
     [property: JsonPropertyName("eps_actual")] double EpsActual,
     [property: JsonPropertyName("eps_actual_by_identity")] IReadOnlyDictionary<string, double> EpsActualByIdentity,
     [property: JsonPropertyName("eps_target")] double? EpsTarget,
+    [property: JsonPropertyName("eps_target_by_identity")] IReadOnlyDictionary<string, double?> EpsTargetByIdentity,
     [property: JsonPropertyName("commands")] IReadOnlyDictionary<string, long> Commands);
 
 public sealed record StopTasksResultDto(
@@ -214,3 +217,83 @@ public sealed record ScenarioAppliedDto(
 public sealed record ScenarioClearedDto(
     [property: JsonPropertyName("identities_removed")] int IdentitiesRemoved,
     [property: JsonPropertyName("tasks_removed")] int TasksRemoved);
+
+public sealed record CorrelationItemDto(
+    [property: JsonPropertyName("app_id")] string AppId,
+    [property: JsonPropertyName("event_key")] string EventKey,
+    [property: JsonPropertyName("label")] string? Label,
+    [property: JsonPropertyName("written_at")] DateTimeOffset WrittenAt);
+
+public sealed record CorrelationDto(
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("ttl")] string Ttl,
+    [property: JsonPropertyName("limit_per_identity")] int LimitPerIdentity,
+    [property: JsonPropertyName("items")] IReadOnlyList<CorrelationItemDto> Items);
+    
+// Khối bản tin của một dòng "message sent" (contract 9.9).
+public sealed record LogMessageDto(
+    [property: JsonPropertyName("event")] string Event,
+    [property: JsonPropertyName("routing_key")] string RoutingKey,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("size_bytes")] int SizeBytes,
+    [property: JsonPropertyName("payload")] object? Payload,
+    [property: JsonPropertyName("truncated")] bool Truncated)
+{
+    public static LogMessageDto From(LogMessageInfo m) =>
+        new(m.Event, m.RoutingKey, m.Kind, m.SizeBytes, PayloadOf(m), m.Truncated);
+
+    // Contract 10.1: verbose tắt -> null; bị cắt -> CHUỖI (JSON đã cụt, không còn hợp lệ); còn nguyên -> đối tượng JSON.
+    private static object? PayloadOf(LogMessageInfo m)
+    {
+        if (m.Payload is null) return null;
+        if (m.Truncated) return m.Payload;
+        try
+        {
+            using var doc = JsonDocument.Parse(m.Payload);
+            return doc.RootElement.Clone();   // Clone vì doc bị giải phóng ngay sau đó
+        }
+        catch (JsonException)
+        {
+            return m.Payload;
+        }
+    }
+}
+
+// Một dòng log trả về cho Console. Field vắng (không biết app_id/task/rule, hoặc không phải dòng bản tin) thì bỏ khỏi JSON.
+public sealed record LogLineDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("at")] DateTimeOffset At,
+    [property: JsonPropertyName("outcome")] string Outcome,
+    [property: JsonPropertyName("app_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AppId,
+    [property: JsonPropertyName("task"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Task,
+    [property: JsonPropertyName("rule"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Rule,
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("message"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LogMessageDto? Message)
+{
+    public static LogLineDto From(LogEntry e) =>
+        new(e.Id, e.At, e.Outcome, e.Identity, e.TaskId, e.Rule, e.Detail,
+            e.Message is null ? null : LogMessageDto.From(e.Message));
+}
+
+public sealed record SetLogLevelRequest([property: JsonPropertyName("level")] string? Level);
+
+public sealed record SetLogVerboseRequest([property: JsonPropertyName("enabled")] bool? Enabled);
+
+// Body của POST/PUT /profiles (contract 4.5, đơn vị giây theo 10.1). Mọi trường nullable để thiếu trường thì báo 400,
+// không bị hiểu thành 0 (FR-CFG-9). ramp_* được phép null.
+public sealed record ProfileRequest(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("interval")] double? Interval,
+    [property: JsonPropertyName("jitter_min")] double? JitterMin,
+    [property: JsonPropertyName("jitter_max")] double? JitterMax,
+    [property: JsonPropertyName("min_gap")] double? MinGap,
+    [property: JsonPropertyName("bypass_frames")] bool? BypassFrames,
+    [property: JsonPropertyName("coalesce_timestamps")] bool? CoalesceTimestamps,
+    [property: JsonPropertyName("ramp_from")] double? RampFrom,
+    [property: JsonPropertyName("ramp_to")] double? RampTo,
+    [property: JsonPropertyName("ramp_duration")] double? RampDuration)
+{
+    public ProfileInput ToInput() =>
+        new(Name, Interval, JitterMin, JitterMax, MinGap, BypassFrames, CoalesceTimestamps,
+            RampFrom, RampTo, RampDuration);
+}

@@ -8,6 +8,7 @@ using VpuSimulator.Application.Options;
 using VpuSimulator.Application.State;
 using VpuSimulator.Application.Scheduling;
 using VpuSimulator.Domain.FollowUp;
+using VpuSimulator.Application.Events;
 
 namespace VpuSimulator.Application.Identity;
 
@@ -63,6 +64,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
     private readonly IUnitRegistry? _units;
     private readonly Func<string, SimulationProfile?>? _profileResolver;
     private readonly ICorrelationStore? _correlationStore;
+    private readonly SseEventBus? _sse;
 
     public IdentityLifecycleService(
         IMessageBrokerFactory factory,
@@ -73,7 +75,8 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         ITaskStore? taskStore = null,
         IUnitRegistry? units = null,
         Func<string, SimulationProfile?>? profileResolver = null,
-        ICorrelationStore? correlationStore = null)
+        ICorrelationStore? correlationStore = null,
+        SseEventBus? sse = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(time);
@@ -87,6 +90,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
         _units = units;
         _profileResolver = profileResolver;
         _correlationStore = correlationStore;
+        _sse = sse;
     }
 
     //Danh sách app_id đang chạy
@@ -197,6 +201,7 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
 
                 _identities[appId] = new RunningIdentity(session, gated, power, cts, loop, loopTask);
                 registered = true;
+                _sse?.Publish("identity_added", new {type = "identity_added", app_id = appId});
                 return IdentityOpResult.Added;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -261,7 +266,8 @@ public sealed class IdentityLifecycleService : IAsyncDisposable
 
             _identities.TryRemove(new KeyValuePair<string, RunningIdentity>(appId, running));
         }
-
+        
+        _sse?.Publish("identity_removed", new { type = "identity_removed", app_id = appId });
         return true;
     }
 

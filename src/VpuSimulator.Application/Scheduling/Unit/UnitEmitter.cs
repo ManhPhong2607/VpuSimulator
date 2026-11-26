@@ -35,7 +35,8 @@ public static class UnitEmitter
         ICorrelationStore correlationStore,
         ILogger? logger = null,
         FixedValues? fixedValues = null,
-        SimulationMode mode = SimulationMode.Simulated)
+        SimulationMode mode = SimulationMode.Simulated,
+        Action<UnitKey>? onEmitted = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(brokerResolver);
@@ -184,6 +185,7 @@ public static class UnitEmitter
                     context.TryCommit(ApplyProposals);
                 }
 
+                onEmitted?.Invoke(key);
                 return RuleOutcome.Emitted;
             };
         };

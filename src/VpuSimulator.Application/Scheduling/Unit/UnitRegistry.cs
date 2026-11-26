@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VpuSimulator.Application.Commands;
 using VpuSimulator.Application.State;
+using VpuSimulator.Application.Events;
 
 namespace VpuSimulator.Application.Scheduling;
 
@@ -40,7 +41,7 @@ public interface IUnitRegistry : ITaskObserver
 
     //FR-SIM-3: bật/tắt phát tự động của một unit. Lựa chọn thủ công được nhớ, VMS update-task không ghi đè.
     UnitAutoResult SetAuto(string appId, string taskId, int roiId, bool auto, string? ruleName = null);
-
+    
     //FR-SIM-9 / W-10: đổi profile của các unit ĐANG TỒN TẠI theo phạm vi. Trả số unit đã đổi.
     //appId null = toàn bộ; taskId chỉ hợp lệ khi có appId. Unit tạo sau vẫn dùng profile mặc định.
     int ApplyProfile(SimulationProfile profile, string? appId = null, string? taskId = null);
@@ -50,7 +51,7 @@ public interface IUnitRegistry : ITaskObserver
     void SetTaskManuallyOff(string appId, string taskId, bool off);
 
     bool IsTaskManuallyOff(string appId, string taskId);
-    
+
     void SetIdentityOff(string appId, bool off);
 
     bool IsIdentityOff(string appId);
@@ -63,6 +64,11 @@ public interface IUnitRegistry : ITaskObserver
 
     //Tên profile mà unit mới của identity sẽ dùng
     string IdentityProfileName(string appId);
+    
+    int RefreshProfile(SimulationProfile profile);
+
+    // Profile này đang được dùng bởi bao nhiêu unit và bao nhiêu identity (profile riêng). Không tính profile mặc định.
+    ProfileUsage UsageOfProfile(string name);
 }
 
 public enum UnitAutoOutcome
@@ -74,6 +80,8 @@ public enum UnitAutoOutcome
 
 /// Auto: giá trị HIỆU LỰC sau khi áp dụng. Có thể là false dù yêu cầu true, khi task/rule đang bị VMS tắt.
 public sealed record UnitAutoResult(UnitAutoOutcome Outcome, IReadOnlyList<UnitKey> Matches, bool Auto);
+
+public sealed record ProfileUsage(int Units, int Identities);
 
 /// <summary>
 /// Giữ mọi <see cref="UnitRunner"/> và đồng bộ chúng với kho task: mỗi rule của mỗi task đang chạy có đúng một unit.
@@ -97,13 +105,14 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         public UnitConfig Config { get; } = config;
     }
 
-    private readonly SimulationProfile _profile;
+    private SimulationProfile _profile;
     private readonly TimeSpan _armDelay;
     private readonly TimeProvider _time;
     private readonly UnitEmitterFactory _emitterFactory;
     private readonly Func<UnitConfigView, double?>? _fixedPeriodSeconds;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
+    private readonly SseEventBus? _sse;
 
     private readonly object _gate = new();
     private readonly Dictionary<UnitKey, Entry> _units = new();
@@ -124,7 +133,8 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         TimeProvider time,
         UnitEmitterFactory emitterFactory,
         Func<UnitConfigView, double?>? fixedPeriodSeconds = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        SseEventBus? sse = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(time);
@@ -144,6 +154,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         _fixedPeriodSeconds = fixedPeriodSeconds;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<UnitRegistry>();
+        _sse = sse;
         _logger.LogInformation("Simulation seed {Seed}, profile {Profile}, arm delay {ArmDelay}", seed, profile.Name,
             armDelay);
     }
@@ -158,6 +169,10 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         try
         {
             Reconcile(appId, result.Current);
+            if (result.Created)
+            {
+                _sse?.Publish("task_added", new { type = "task_added", app_id = appId, task = result.Current.TaskId });
+            }
         }
         catch (Exception ex)
         {
@@ -191,6 +206,11 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         foreach (var runner in stale)
         {
             DisposeInBackground(runner);
+        }
+
+        foreach (var task in removed)
+        {
+            _sse?.Publish("task_removed", new { type = "task_removed", app_id = appId, task = task.TaskId });
         }
     }
 
@@ -383,7 +403,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
             return _manualTaskOff.Contains((appId, taskId));
         }
     }
-    
+
     public void SetIdentityOff(string appId, bool off)
     {
         ArgumentNullException.ThrowIfNull(appId);
@@ -456,6 +476,58 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         return targets.Count;
     }
 
+    public int RefreshProfile(SimulationProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        var errors = profile.Validate();
+        if (errors.Count > 0)
+        {
+            throw new ArgumentException(string.Join("; ", errors), nameof(profile));
+        }
+
+        List<UnitRunner> targets;
+        lock (_gate)
+        {
+            // Profile mặc định và profile riêng của identity: các unit TẠO SAU sẽ dùng định nghĩa mới
+            if (_profile.Name == profile.Name)
+            {
+                _profile = profile;
+            }
+
+            foreach (var appId in _identityProfiles.Where(kv => kv.Value.Name == profile.Name)
+                         .Select(kv => kv.Key).ToList())
+            {
+                _identityProfiles[appId] = profile;
+            }
+
+            // Các unit ĐANG chạy với profile này
+            targets = _units.Values
+                .Where(e => e.Runner.Snapshot().Profile == profile.Name)
+                .Select(e => e.Runner)
+                .ToList();
+        }
+
+        // Gọi ngoài khoá của registry (giống ApplyProfile): runner có khoá riêng
+        foreach (var runner in targets)
+        {
+            runner.SetProfile(profile);
+        }
+
+        return targets.Count;
+    }
+
+    public ProfileUsage UsageOfProfile(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        lock (_gate)
+        {
+            return new ProfileUsage(
+                _units.Values.Count(e => e.Runner.Snapshot().Profile == name),
+                _identityProfiles.Values.Count(p => p.Name == name));
+        }
+    }
+
     /// <summary>Chờ các unit đã gỡ dừng hẳn. Dùng trong test và khi tắt.</summary>
     public Task WhenIdleAsync() => Task.WhenAll(_disposing.Keys.ToArray());
 
@@ -490,7 +562,7 @@ public sealed class UnitRegistry : IUnitRegistry, IAsyncDisposable
         && !_manualTaskOff.Contains((key.AppId, key.TaskId))
         && rule.Enable != false
         && _manualAuto.GetValueOrDefault(key, true);
-    
+
     private void Reconcile(string appId, ParsedTask task)
     {
         var stale = new List<UnitRunner>();
